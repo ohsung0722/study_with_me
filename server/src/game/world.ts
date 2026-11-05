@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import {
   BUILDING_CAPACITY, BUILDING_ID, DRINKS, DRINK_LIFETIME_MS, GREET_TOAST_MS, INTERACT_RANGE, MAP, PLAYER_RADIUS, TODAY_BROADCAST_MS, WALK_SPEED,
-  isBlocked, kstDayKey, seatById, validateNickname, zoneAt,
+  isBlocked, kstDayKey, seatById, splitAtKstMidnight, validateNickname, zoneAt,
   type DrinkId, type GreetResult, type JoinResult, type PlayerView, type Profile, type SitResult, type TodayStats,
 } from '@studyverse/shared';
 import { computeToday } from './today';
@@ -216,6 +216,21 @@ export class World {
     p.drink = { id: drink, until: this.deps.now() + DRINK_LIFETIME_MS };
     this.deps.out.toAll('playerUpdated', toView(p));
     return true;
+  }
+
+  /** Seconds studied in this seat today (KST): stored sessions plus the today-part of the live one. NPCs count 0. */
+  seatTodaySec(seatId: string): number {
+    const { now, store } = this.deps;
+    const t = now();
+    const day = kstDayKey(t);
+    let sec = store.seatDaySec(seatId, day, BUILDING_ID);
+    for (const p of this.players.values()) {
+      if (p.isNpc || p.seatId !== seatId || p.status.kind !== 'studying') continue;
+      let ms = 0;
+      for (const part of splitAtKstMidnight(p.status.startedAt, t)) if (part.dayKey === day) ms += part.endMs - part.startMs;
+      sec += Math.floor(ms / 1000);
+    }
+    return sec;
   }
 
   view(id: string): PlayerView | undefined {

@@ -31,6 +31,7 @@ export class World {
   private lastTodayAt: number;
   private lastToday: TodayStats | null = null;
   private pendingGreets = new Map<string, { fromId: string; at: number }>(); // target id -> latest greet
+  private closed = false; // set by shutdown(): nothing is persisted afterwards
 
   constructor(private deps: WorldDeps) {
     this.lastTodayAt = deps.now();
@@ -42,12 +43,8 @@ export class World {
     if (!nick.ok) return { ok: false, reason: 'nickname' };
     for (const p of [...this.players.values()]) {
       if (!p.isNpc && p.anonId === profile.anonId) {
-        this.saveSession(p);
+        this.leave(p.id); // the single cleanup path; the disconnect that kick triggers then finds nothing
         out.kick(p.id, 'replaced');
-        this.players.delete(p.id);
-        this.movedIds.delete(p.id);
-        out.setRoom(p.id, null);
-        out.toAllExcept(connId, 'playerLeft', { id: p.id, npc: false });
       }
     }
 
@@ -200,7 +197,8 @@ export class World {
   }
 
   greetAccept(connId: string, fromId: string): void {
-    if (!this.players.has(connId)) return;
+    const p = this.players.get(connId);
+    if (!p || (p.status.kind === 'studying' && p.status.focus)) return; // focused players don't take greetings
     const g = this.pendingGreets.get(connId);
     if (!g || g.fromId !== fromId || this.deps.now() - g.at > GREET_TOAST_MS) return;
     this.pendingGreets.delete(connId);
@@ -212,7 +210,7 @@ export class World {
     if (!p) return false;
     const machine = (Object.keys(DRINKS) as (keyof typeof DRINKS)[]).find((m) => (DRINKS[m] as readonly string[]).includes(drink));
     const spot = machine && MAP.interactables.find((i) => i.id === machine);
-    if (!spot || Math.hypot(p.x - spot.x, p.z - spot.z) > INTERACT_RANGE) return false;
+    if (!spot || Math.hypot(p.x - spot.x, p.z - spot.z) > INTERACT_RANGE + 0.5) return false; // same slack as sit
     p.drink = { id: drink, until: this.deps.now() + DRINK_LIFETIME_MS };
     this.deps.out.toAll('playerUpdated', toView(p));
     return true;
@@ -245,7 +243,9 @@ export class World {
   }
 
   shutdown(): void {
+    if (this.closed) return;
     for (const p of this.players.values()) this.saveSession(p);
+    this.closed = true;
   }
 
   /** Bring the NPC count in line with npcTarget(realCount()); highest index leaves first. */
@@ -284,7 +284,7 @@ export class World {
 
   /** Persist an open studying session ending now; restarts the timer so it is never double counted. */
   private saveSession(p: PlayerState): void {
-    if (p.isNpc || p.status.kind !== 'studying' || !p.seatId) return;
+    if (this.closed || p.isNpc || p.status.kind !== 'studying' || !p.seatId) return;
     const end = this.deps.now();
     if (end <= p.status.startedAt) return;
     this.deps.store.addSession({

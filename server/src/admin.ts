@@ -4,7 +4,8 @@ import { openStore, type RecordStore } from './store/store';
 
 const USAGE = [
   '사용법: npm run admin -- --key <키> <명령>',
-  '  today                         오늘의 기록 보기',
+  '  today                         오늘의 기록 보기 (anonId 포함)',
+  '  find <닉네임>                 닉네임으로 anonId 찾기 (일부만 입력해도 됨)',
   '  hide <anonId>                 랭킹에서 숨기기',
   '  unhide <anonId>               숨김 해제',
   '  rename <anonId> <닉네임>      닉네임 변경',
@@ -36,11 +37,21 @@ export function runAdmin(
     const day = kstDayKey(Date.now());
     const t = store.todayStats(day, BUILDING_ID);
     const lines = [`날짜: ${day} (KST)`, `공부한 사람: ${t.people}명`, `총 공부 시간: ${fmtSec(t.totalSec)}`];
-    if (t.top5.length > 0) {
+    const top = store.adminTop5(day, BUILDING_ID);
+    if (top.length > 0) {
       lines.push('상위 5명:');
-      t.top5.forEach((r, i) => lines.push(`  ${i + 1}. ${r.nickname} - ${fmtSec(r.sec)}`));
+      top.forEach((r, i) => lines.push(`  ${i + 1}. ${r.nickname} - ${fmtSec(r.sec)} (anonId: ${r.anonId})`));
     }
     return ok(lines.join('\n'));
+  }
+  if (cmd === 'find') {
+    const text = [anonId, ...rest].join(' ').trim();
+    if (!text) return fail(`닉네임이 필요합니다\n${USAGE}`);
+    const found = store.findProfiles(text);
+    if (found.length === 0) return fail('해당 사용자를 찾을 수 없습니다');
+    return ok(found.map((p) =>
+      `anonId: ${p.anonId} | 닉네임: ${p.nickname} | 관리자 지정 이름: ${p.adminName ?? '-'} | 숨김: ${p.hidden ? '예' : '아니오'}`,
+    ).join('\n'));
   }
   if (cmd !== 'hide' && cmd !== 'unhide' && cmd !== 'rename' && cmd !== 'delete') {
     return fail(`알 수 없는 명령입니다\n${USAGE}`);

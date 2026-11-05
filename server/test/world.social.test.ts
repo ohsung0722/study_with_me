@@ -88,3 +88,22 @@ describe('drinks', () => {
     expect(out.find('toAll', 'playerUpdated').pop()!.args[0]).toMatchObject({ id: 'a', drink: null });
   });
 });
+
+describe('fix wave: drink range and greetAccept focus guard', () => {
+  test('takeDrink allows the same +0.5m slack as sit (client prompt range + latency)', () => {
+    const { world, add } = setup();
+    add('a', '가나다', 2.9, 3); // 1.9m from the coffee machine at (1, 3)
+    expect(world.takeDrink('a', 'americano')).toBe(true);
+    add('b', '라마바', 3.1, 3); // 2.1m
+    expect(world.takeDrink('b', 'americano')).toBe(false);
+  });
+
+  test('greetAccept does nothing while the accepter studies with focus', () => {
+    const { world, out, add } = setup();
+    add('b', '라마바', 18.6, 3.2); add('a', '가나다', 19.6, 3.2);
+    expect(world.greet('a')).toEqual({ ok: true, targetId: 'b' });
+    expect(world.sit('b', 'R01')).toEqual({ ok: true }); // desk → focus
+    world.greetAccept('b', 'a');
+    expect(out.find('toAll', 'wave')).toHaveLength(1);
+  });
+});

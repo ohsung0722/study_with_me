@@ -52,13 +52,20 @@ STUDYVERSE_ADMIN_KEY=비밀키 npm run admin -- --key 비밀키 today
 
 | 명령 | 하는 일 |
 |---|---|
-| `today` | 오늘(한국 시간 기준)의 기록 보기 |
+| `today` | 오늘(한국 시간 기준)의 기록 보기. 상위 5명 옆에 각자의 `anonId`가 함께 나옵니다 |
+| `find <닉네임>` | 닉네임(또는 관리자가 바꾼 이름)으로 사람 찾기. 일부만 입력해도 되고, `anonId`·닉네임·바꾼 이름·숨김 여부를 보여 줍니다 |
 | `hide <anonId>` | 랭킹(기록판 TOP 5)에서 숨기기 |
 | `unhide <anonId>` | 숨김 해제 |
 | `rename <anonId> <닉네임>` | 닉네임 변경 |
 | `delete <anonId> [YYYY-MM-DD]` | 기록 삭제 (날짜를 생략하면 그 사람의 전체 기록) |
 
 `anonId`는 각 브라우저가 만든 익명 ID입니다(브라우저 localStorage의 `studyverse.profile.v1`).
+기록판에서 문제 닉네임을 봤다면 `find <닉네임>`(또는 `today`)으로 `anonId`를 확인한 뒤 `hide`/`rename`에 넘기면 됩니다.
+
+```bash
+STUDYVERSE_ADMIN_KEY=비밀키 npm run admin -- --key 비밀키 find 문제닉네임
+STUDYVERSE_ADMIN_KEY=비밀키 npm run admin -- --key 비밀키 rename <anonId> 새닉네임
+```
 
 ## 테스트
 

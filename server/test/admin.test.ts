@@ -67,3 +67,35 @@ describe('admin cli', () => {
     expect(run(store, 'hide').code).toBe(1);
   });
 });
+
+describe('admin find / today with anonId', () => {
+  test('find matches nickname or admin name and prints anonId, nickname, admin name, hidden', () => {
+    store.upsertProfile('u1', '나쁜이름');
+    store.upsertProfile('u2', '착한이름');
+    store.rename('u2', '고친이름');
+    store.setHidden('u2', true);
+    const a = run(store, 'find', '나쁜이름');
+    expect(a.code).toBe(0);
+    expect(a.out).toContain('u1');
+    expect(a.out).not.toContain('u2');
+    const b = run(store, 'find', '고친이름');
+    expect(b.code).toBe(0);
+    expect(b.out).toContain('u2');
+    expect(b.out).toContain('착한이름');
+    expect(b.out).toContain('고친이름');
+    expect(b.out).toContain('숨김: 예');
+    expect(a.out).toContain('숨김: 아니오');
+    expect(run(store, 'find', '이름').out).toMatch(/u1[\s\S]*u2|u2[\s\S]*u1/); // partial match lists both
+    expect(run(store, 'find', '없는사람')).toEqual({ code: 1, out: NOT_FOUND });
+    expect(run(store, 'find').code).toBe(1);
+  });
+
+  test('today rows include each person\'s anonId', () => {
+    const now = Date.now();
+    store.upsertProfile('anon-xyz', '가나다');
+    store.addSession({ anonId: 'anon-xyz', buildingId: BUILDING_ID, seatId: 'R01', startMs: now - 120_000, endMs: now - 60_000 });
+    const r = run(store, 'today');
+    expect(r.out).toContain('가나다');
+    expect(r.out).toContain('anon-xyz');
+  });
+});

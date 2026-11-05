@@ -14,8 +14,14 @@ export interface RecordStore {
   isHidden(anonId: string): boolean;
   rename(anonId: string, nickname: string): void;
   deleteSessions(anonId: string, dayKey?: string): number;
+  /** Admin: profiles whose nickname or admin name contains `text`. */
+  findProfiles(text: string): AdminProfile[];
+  /** Admin: the same top 5 as the public board, with each row's anonId. */
+  adminTop5(dayKey: string, buildingId: string): { anonId: string; nickname: string; sec: number }[];
   close(): void;
 }
+
+export interface AdminProfile { anonId: string; nickname: string; adminName: string | null; hidden: boolean }
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS profiles (
@@ -57,7 +63,7 @@ export function openStore(path: string): RecordStore {
      FROM sessions WHERE building_id = ? AND day_key = ?`,
   );
   const topRows = db.prepare(
-    `SELECT COALESCE(p.admin_name, p.nickname, '') AS name, SUM(s.end_ms - s.start_ms) AS ms
+    `SELECT s.anon_id AS anon_id, COALESCE(p.admin_name, p.nickname, '') AS name, SUM(s.end_ms - s.start_ms) AS ms
      FROM sessions s LEFT JOIN profiles p ON p.anon_id = s.anon_id
      WHERE s.building_id = ? AND s.day_key = ? AND COALESCE(p.hidden, 0) = 0
      GROUP BY s.anon_id
@@ -75,6 +81,11 @@ export function openStore(path: string): RecordStore {
   const rename = db.prepare('UPDATE profiles SET admin_name = ? WHERE anon_id = ?');
   const delDay = db.prepare('DELETE FROM sessions WHERE anon_id = ? AND day_key = ?');
   const delAll = db.prepare('DELETE FROM sessions WHERE anon_id = ?');
+  const findProfiles = db.prepare(
+    `SELECT anon_id, nickname, admin_name, hidden FROM profiles
+     WHERE instr(nickname, ?1) > 0 OR instr(COALESCE(admin_name, ''), ?1) > 0
+     ORDER BY updated_ms DESC`,
+  );
 
   return {
     upsertProfile(anonId, nickname) {
@@ -122,6 +133,17 @@ export function openStore(path: string): RecordStore {
     deleteSessions(anonId, dayKey) {
       const r = dayKey === undefined ? delAll.run(anonId) : delDay.run(anonId, dayKey);
       return num(r.changes);
+    },
+    findProfiles(text) {
+      return findProfiles.all(text).map((r) => ({
+        anonId: String(r.anon_id), nickname: String(r.nickname),
+        adminName: r.admin_name == null ? null : String(r.admin_name), hidden: num(r.hidden) === 1,
+      }));
+    },
+    adminTop5(dayKey, buildingId) {
+      return topRows.all(buildingId, dayKey).map((r) => ({
+        anonId: String(r.anon_id), nickname: String(r.name), sec: Math.floor(num(r.ms) / 1000),
+      }));
     },
     close() {
       db.close();

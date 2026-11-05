@@ -144,3 +144,31 @@ describe('World seats/timer', () => {
     expect(store.userDaySec('A', kstDayKey(0))).toBe(45);
   });
 });
+
+describe('fix wave: replace and shutdown', () => {
+  test('replacing a connection emits playerLeft exactly once (kick disconnects synchronously)', () => {
+    const { world, out } = setup(0);
+    // socket.io's disconnect(true) fires the disconnect handler (→ leave) inside kick
+    out.kick = (id: string, ev: 'replaced') => { out.calls.push({ kind: 'kick', id, ev, args: [] }); world.leave(id); };
+    world.join('watcher', prof('W', '지켜봄'));
+    world.join('old', prof('A', 'userA'));
+    world.join('new', prof('A', 'userA'));
+    const left = out.calls.filter((c) => c.ev === 'playerLeft' && (c.args[0] as { id: string }).id === 'old');
+    expect(left).toHaveLength(1);
+    expect(world.realCount()).toBe(2);
+  });
+
+  test('after shutdown, leave/stand/shutdown persist nothing more', () => {
+    const { world, store, clock } = setup(0);
+    joinAt(world, 'a', 'A', 'R01');
+    world.sit('a', 'R01');
+    clock.set(45_000);
+    world.shutdown();
+    expect(store.userDaySec('A', kstDayKey(0))).toBe(45);
+    clock.set(50_000);
+    world.stand('a');
+    world.shutdown();
+    world.leave('a'); // io.close() disconnects every socket afterwards
+    expect(store.userDaySec('A', kstDayKey(0))).toBe(45);
+  });
+});

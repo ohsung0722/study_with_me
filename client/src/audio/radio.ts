@@ -241,4 +241,10 @@ export class Radio {
       this.voice = null; // no Web Audio: stay silent
     }
   }
+
+  /** Stops the sound without changing the saved choice (e.g. this tab was replaced by another). */
+  dispose(): void {
+    this.voice?.stop();
+    this.voice = null;
+  }
 }

@@ -1,9 +1,11 @@
 import './styles.css';
 import type { Profile } from '@studyverse/shared';
 import { connect } from './net';
+import { joinWithRetry } from './joinFlow';
 import { loadProfile, saveProfile } from './profile';
 import { isPcLike, showPcOnly } from './ui/pcOnly';
 import { showEntry } from './ui/entry';
+import { Game } from './game/game';
 
 const root = document.getElementById('app')!;
 
@@ -25,30 +27,25 @@ async function start(): Promise<void> {
   saveProfile(localStorage, profile);
 
   const conn = connect();
+  let replaced = false;
   conn.socket.on('replaced', () => {
+    replaced = true;
     conn.socket.disconnect();
     overlay('다른 탭에서 접속했어요');
   });
 
-  let notice: HTMLElement | null = null;
-  for (;;) {
-    try {
-      const r = await conn.join(profile);
-      if (r.ok) break;
-      if (r.reason === 'nickname') {
-        notice?.remove();
-        overlay('사용할 수 없는 닉네임이에요. 새로고침해 주세요');
-        return;
-      }
-      if (!notice) notice = overlay('지금 독서실이 가득 찼어요. 자리가 나면 자동으로 들어가요');
-    } catch {
-      /* no ack within 5s: retry */
-    }
-    await new Promise((res) => setTimeout(res, 5000));
+  let notice: HTMLElement | undefined;
+  const r = await joinWithRetry(conn, profile, {
+    onFull: () => { notice ??= overlay('지금 독서실이 가득 찼어요. 자리가 나면 자동으로 들어가요'); },
+    cancelled: () => replaced,
+  });
+  (notice as HTMLElement | undefined)?.remove(); // set from the onFull callback
+  if (!r) return;
+  if (!r.ok) {
+    overlay('사용할 수 없는 닉네임이에요. 새로고침해 주세요');
+    return;
   }
-  notice?.remove();
-  // Task 15 replaces this placeholder with the 3D game.
-  root.textContent = '입장 완료';
+  new Game(root, conn, r, profile);
 }
 
 void start();

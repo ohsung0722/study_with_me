@@ -80,4 +80,18 @@ describe('Radio', () => {
     expect(a.created()).toBe(1);
     r.play('off');
   });
+
+  test('dispose() silences the radio but keeps the saved choice (restored next visit)', () => {
+    vi.useFakeTimers();
+    const a = fakeAudio();
+    const s = memStorage();
+    const r = new Radio(s, a.factory);
+    r.play('rain');
+    expect(a.started.size).toBeGreaterThan(0);
+    r.dispose();
+    vi.advanceTimersByTime(1000);
+    expect(a.started.size).toBe(0);
+    expect(s.m.get('studyverse.radio')).toBe('rain');
+    expect(r.current()).toBe('rain');
+  });
 });

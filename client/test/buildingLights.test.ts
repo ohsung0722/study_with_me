@@ -60,6 +60,31 @@ describe('building lamps (light pool + glow)', () => {
     expect(pointLights(scene).filter((l) => l.intensity > 0 && l.position.x < 13)).toHaveLength(0);
   });
 
+  test('corridor sconces: glow + wall fill by day, brighter at night, never a real light', () => {
+    const scene = new THREE.Scene();
+    const dim = new ZoneDimmer();
+    const b = buildBuilding(scene, dim);
+    const focus = { x: 14.5, z: 12 }; // standing in the corridor
+    const wallFill = () => (scene.getObjectByName('corridor:wall') as THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>)
+      .material.emissive.r;
+    b.applyTheme(DAY);
+    settle(b, dim, focus);
+    const day = colourSum(scene, 'glow:corridor');
+    expect(day).toBeGreaterThan(0);
+    expect(wallFill()).toBeGreaterThan(0);
+    const dayLights = pointLights(scene).filter((l) => l.intensity > 0);
+    expect(dayLights.every((l) => l.position.x < 13 || l.position.x > 16)).toBe(true); // pool stays on room lamps
+    b.applyTheme(NIGHT);
+    settle(b, dim, focus);
+    const night = colourSum(scene, 'glow:corridor');
+    expect(night).toBeGreaterThan(day);
+    expect(pointLights(scene).length).toBeLessThanOrEqual(6);
+    expect(pointLights(scene).filter((l) => l.intensity > 0).every((l) => l.position.x < 13 || l.position.x > 16)).toBe(true);
+    dim.setZone('lounge'); // the corridor dims with the other zones
+    settle(b, dim, focus);
+    expect(colourSum(scene, 'glow:corridor')).toBeLessThan(night * OTHER_ZONE_BRIGHTNESS + 1e-6);
+  });
+
   test('glow vertex colours scale with the zone dim factor', () => {
     const scene = new THREE.Scene();
     const dim = new ZoneDimmer();

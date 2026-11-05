@@ -75,7 +75,7 @@ export function createScene(container: HTMLElement, opts: SceneOptions = {}): Sc
   key.castShadow = true;
   key.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
   key.shadow.bias = -0.0005;
-  Object.assign(key.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, near: 1, far: 60 });
+  Object.assign(key.shadow.camera, { left: -23, right: 23, top: 23, bottom: -23, near: 1, far: 60 }); // 36 × 24 m building
   scene.add(amb, key, key.target);
 
   const applyTier = (tier: Tier) => {

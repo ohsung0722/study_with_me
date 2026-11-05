@@ -2,7 +2,8 @@
 // quad with a shared radial-gradient texture, drawn additively without writing depth. All quads of a zone share one
 // mesh (one draw call per zone). A quad's colour is lamp colour × (surface colour × diffuse + sheen): the diffuse
 // light a real lamp would add to that surface plus the soft specular sheen it used to leave on dark matte surfaces.
-// It lives in the vertex colours, so a level change only rewrites a small buffer.
+// It lives in the vertex colours, so a level change only rewrites a small buffer. Wall pools (addWall) are the same
+// thing standing upright on a wall, for the wash of a wall sconce.
 import * as THREE from 'three';
 import type { Rect, ZoneId } from '@studyverse/shared';
 
@@ -54,7 +55,7 @@ export function glowTexture(): THREE.Texture {
   return tex;
 }
 
-interface Pending { zone: ZoneId; q: GlowQuad; y: number }
+interface Pending { zone: ZoneId; q: GlowQuad; y: number; wallX?: number }
 const WHITE = new THREE.Color(1, 1, 1);
 
 export class GlowLayer {
@@ -73,7 +74,19 @@ export class GlowLayer {
 
   /** Register a quad at height y on `surface` (see setSurface); returns its id. Call build() after the last add(). */
   add(zone: ZoneId, q: GlowQuad, y: number, surface?: string): number {
-    this.pending.push({ zone, q, y });
+    return this.push({ zone, q, y }, surface);
+  }
+
+  /**
+   * Register an upright pool on the wall plane x = wallX (a sconce's wash on a wall running along z). The quad is in
+   * wall coordinates: q.x1..x2 is the extent along z, q.z1..z2 the height range. Returns its id.
+   */
+  addWall(zone: ZoneId, wallX: number, q: GlowQuad, surface?: string): number {
+    return this.push({ zone, q, y: 0, wallX }, surface);
+  }
+
+  private push(p: Pending, surface?: string): number {
+    this.pending.push(p);
     this.levels.push(0);
     this.sheens.push(0);
     let tint = WHITE;
@@ -104,11 +117,12 @@ export class GlowLayer {
     for (const [zone, ids] of byZone) {
       const pos = new Float32Array(ids.length * 12), uv = new Float32Array(ids.length * 8), idx: number[] = [];
       ids.forEach((id, k) => {
-        const { q, y } = this.pending[id];
-        pos.set([q.x1, y, q.z1, q.x2, y, q.z1, q.x2, y, q.z2, q.x1, y, q.z2], k * 12);
+        const { q, y, wallX: wx } = this.pending[id];
+        if (wx === undefined) pos.set([q.x1, y, q.z1, q.x2, y, q.z1, q.x2, y, q.z2, q.x1, y, q.z2], k * 12);
+        else pos.set([wx, q.z1, q.x1, wx, q.z1, q.x2, wx, q.z2, q.x2, wx, q.z2, q.x1], k * 12);
         uv.set([q.u1, q.v1, q.u2, q.v1, q.u2, q.v2, q.u1, q.v2], k * 8);
         const b = k * 4;
-        idx.push(b, b + 2, b + 1, b, b + 3, b + 2); // counter-clockwise seen from above (+y)
+        idx.push(b, b + 2, b + 1, b, b + 3, b + 2); // counter-clockwise seen from above (+y); wall quads: double-sided
         this.where[id] = { mesh: this.meshes.length, offset: b };
       });
       const geo = new THREE.BufferGeometry();
@@ -122,6 +136,7 @@ export class GlowLayer {
       const mat = new THREE.MeshBasicMaterial({
         map: this.texture, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending,
         depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, fog: false,
+        side: THREE.DoubleSide, // wall pools face either way; floor pools are only ever seen from above
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.name = `glow:${zone}`;

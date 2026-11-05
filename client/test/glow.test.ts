@@ -63,4 +63,30 @@ describe('GlowLayer', () => {
     const pos = reading.geometry.getAttribute('position');
     expect(pos.getY(0)).toBeCloseTo(0.8);
   });
+
+  test('wall pools: an upright quad on the plane x = wallX (quad x → world z, quad z → height), same zone mesh', () => {
+    const parent = new THREE.Group();
+    const layer = new GlowLayer(parent, new THREE.Texture());
+    const floor = layer.add('corridor', glowQuad(14.5, 5, 2, { x1: 13, z1: 0, x2: 16, z2: 24 })!, 0.025);
+    // a sconce at z=5, y=2 on the x=13.1 wall face, clipped to the wall segment z0–10 and the wall height 0–3
+    const q = glowQuad(5, 2, 1.5, { x1: 0, z1: 0, x2: 10, z2: 3 })!;
+    const wall = layer.addWall('corridor', 13.1, q, 'wall');
+    layer.build();
+    expect(parent.children).toHaveLength(1); // floor and wall pools share the zone's one mesh
+    const mesh = parent.children[0] as THREE.Mesh;
+    expect((mesh.material as THREE.MeshBasicMaterial).side).toBe(THREE.DoubleSide);
+    const pos = mesh.geometry.getAttribute('position');
+    const xs = [4, 5, 6, 7].map(i => pos.getX(i)), ys = [4, 5, 6, 7].map(i => pos.getY(i)), zs = [4, 5, 6, 7].map(i => pos.getZ(i));
+    expect(xs.every(x => Math.abs(x - 13.1) < 1e-6)).toBe(true);
+    expect(Math.min(...zs)).toBeCloseTo(3.5); expect(Math.max(...zs)).toBeCloseTo(6.5);
+    expect(Math.min(...ys)).toBeCloseTo(0.5); expect(Math.max(...ys)).toBeCloseTo(3);
+    layer.setColor(0xffffff);
+    layer.setSurface('wall', 0xffffff, 0.5);
+    layer.set(floor, 1);
+    layer.set(wall, 1, 0.2);
+    layer.flush();
+    const col = mesh.geometry.getAttribute('color');
+    expect(col.getX(0)).toBeCloseTo(1);
+    expect(col.getX(4)).toBeCloseTo(0.7); // 0.5 surface × 1 + 0.2 sheen
+  });
 });

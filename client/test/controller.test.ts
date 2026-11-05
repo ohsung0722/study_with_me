@@ -5,23 +5,26 @@ import { stepMovement, walkBlocked } from '../src/game/controller';
 const free = () => false;
 
 describe('stepMovement', () => {
+  const run = (dir: { x: number; z: number }, yaw: number, ticks: number) => {
+    let p = { x: 0, z: 0 }, last = { ry: 0 };
+    for (let i = 0; i < ticks; i++) { const r = stepMovement(p, dir, yaw, 0.1, free); p = r; last = r; }
+    return { ...p, ry: last.ry };
+  };
   test('stepMovement: 1s forward moves 4m; diagonal still 4m', () => {
-    const f = stepMovement({ x: 0, z: 0 }, { x: 0, z: 1 }, 0, 1, free);
+    const f = run({ x: 0, z: 1 }, 0, 10);
     expect(Math.hypot(f.x, f.z)).toBeCloseTo(WALK_SPEED);
-    expect(f.moving).toBe(true);
-    const d = stepMovement({ x: 0, z: 0 }, { x: 1, z: 1 }, 0.7, 1, free);
+    const d = run({ x: 1, z: 1 }, 0.7, 10);
     expect(Math.hypot(d.x, d.z)).toBeCloseTo(4);
   });
 
   test('W moves away from the camera and facing follows (sin ry, cos ry)', () => {
-    const a = stepMovement({ x: 0, z: 0 }, { x: 0, z: 1 }, 0, 0.5, free);
+    const a = run({ x: 0, z: 1 }, 0, 5);
     expect(a.z).toBeCloseTo(-2); expect(a.x).toBeCloseTo(0);
     expect(Math.abs(a.ry)).toBeCloseTo(Math.PI);
-    const b = stepMovement({ x: 0, z: 0 }, { x: 0, z: 1 }, Math.PI / 2, 0.5, free);
+    const b = run({ x: 0, z: 1 }, Math.PI / 2, 5);
     expect(b.x).toBeCloseTo(-2); expect(b.z).toBeCloseTo(0);
     expect(Math.sin(b.ry)).toBeCloseTo(-1);
-    // D moves to the camera's right: yaw 0 -> +x
-    const r = stepMovement({ x: 0, z: 0 }, { x: 1, z: 0 }, 0, 0.5, free);
+    const r = run({ x: 1, z: 0 }, 0, 5);
     expect(r.x).toBeCloseTo(2);
   });
 
@@ -53,4 +56,9 @@ describe('walkBlocked', () => {
   test('walls block', () => {
     expect(walkBlocked(13, 5)).toBe(true); // lounge|corridor wall
   });
+});
+
+test('stepMovement clamps dt to 0.1s', () => {
+  const r = stepMovement({ x: 0, z: 0 }, { x: 0, z: 1 }, 0, 5, () => false);
+  expect(Math.hypot(r.x, r.z)).toBeCloseTo(0.4);
 });

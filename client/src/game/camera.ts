@@ -62,7 +62,7 @@ export class CameraRig {
       const full = dir.length();
       if (full > 1e-6 && occluders.length) {
         this.ray.set(head, dir.divideScalar(full));
-        this.ray.near = 0; this.ray.far = full;
+        this.ray.camera = this.cam; this.ray.near = 0; this.ray.far = full;
         const hit = this.ray.intersectObjects(occluders, true)[0];
         if (hit) {
           const d = Math.max(0.4, hit.distance - 0.2);

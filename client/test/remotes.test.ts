@@ -28,3 +28,12 @@ describe('Interpolator', () => {
     expect(i.sample(5000)).toEqual({ x: 10, z: 20, ry: 1 });
   });
 });
+
+test('reset clears history', () => {
+  const i = new Interpolator();
+  i.push(1000, { x: 1, z: 1, ry: 0 });
+  i.reset();
+  expect(i.sample(2000)).toBeNull();
+  i.push(10, { x: 2, z: 2, ry: 0 }); // earlier timestamp accepted after reset
+  expect(i.sample(2000)).toEqual({ x: 2, z: 2, ry: 0 });
+});

@@ -12,6 +12,8 @@ function lerpAngle(a: number, b: number, k: number): number {
 export class Interpolator {
   private snaps: Snap[] = [];
 
+  reset(): void { this.snaps = []; }
+
   push(serverT: number, s: { x: number; z: number; ry: number }): void {
     const last = this.snaps[this.snaps.length - 1];
     if (last && serverT <= last.t) return; // drop stale/duplicate

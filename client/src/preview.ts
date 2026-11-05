@@ -1,13 +1,16 @@
 // Dev-only 3D preview (served by Vite at /preview.html; not part of the production build or the game path).
 // Renders the building with a few avatars so the look can be checked without the server.
 import * as THREE from 'three';
-import { MAP, seatById, zoneAt, type Appearance, type PlayerView, type Status, type ZoneId } from '@studyverse/shared';
+import { MAP, seatById, zoneAt, type Seat, type Appearance, type PlayerView, type Status, type ZoneId } from '@studyverse/shared';
 import { createScene } from './three/scene';
 import { buildBuilding } from './three/building';
 import { DAY, NIGHT, ThemeBlender } from './three/theme';
 import { ZoneDimmer } from './three/zoneDim';
 import { createAvatar, type AvatarRig } from './three/avatar';
 import { LabelSprite, labelText } from './three/label';
+import { InputState } from './game/input';
+import { stepMovement, walkBlocked } from './game/controller';
+import { CameraRig } from './game/camera';
 
 const view = document.getElementById('view')!;
 const help = document.getElementById('help')!;
@@ -52,14 +55,10 @@ const seatPos = (id: string) => ({ x: seatById(id)!.x, z: seatById(id)!.z });
 // 1) "me", walking a loop in the lounge
 const walker = addActor({ nickname: '나민수', appearance: look('short', '#4a2e1a', '#4fc3f7'), isNpc: false, x: 6.5, z: 18.5,
   seatId: null, status: { kind: 'none' } }, { isMe: true });
-walker.rig.setPose('walk');
-walker.tick = (t) => {
-  const a = t * 0.6, x = 6.5 + Math.cos(a) * 3.5, z = 18.5 + Math.sin(a) * 2.2;
-  const dx = -Math.sin(a) * 3.5, dz = Math.cos(a) * 2.2; // velocity direction
-  walker.rig.root.position.set(x, 0, z);
-  walker.rig.root.rotation.y = Math.atan2(dx, dz); // forward = (sin ry, cos ry)
-  walker.view.x = x; walker.view.z = z;
-};
+// "me": WASD (camera-relative) + CameraRig. F toggles the rig view, C seats at the nearest seat.
+const input = new InputState(window);
+walker.rig.root.position.set(14.5, 0, 22);
+walker.view.x = 14.5; walker.view.z = 22;
 // 2) seated, focus-mode studying in the reading room
 addActor({ nickname: '지우', appearance: look('long', '#3b2a1e', '#81c784'), isNpc: false, ...seatPos('R08'), seatId: 'R08',
   status: studying(134, true) });
@@ -95,6 +94,12 @@ window.addEventListener('pointermove', e => {
 });
 ctx.renderer.domElement.addEventListener('wheel', e => { dist = Math.min(60, Math.max(4, dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: true });
 
+// ---------- "me" camera rig (F toggles, C seats) ----------
+const rig = new CameraRig(ctx.camera, ctx.renderer.domElement);
+let seated: Seat | null = null;
+const myPos = new THREE.Vector3();
+const occluders = () => ctx.scene.children.filter(o => !actors.some(a => a.rig.root === o) && !(o as THREE.Light).isLight);
+
 // ---------- keys: 1/2 theme, 3-7 zone, 0 none ----------
 const ZONE_KEYS: Record<string, ZoneId> = { Digit3: 'lounge', Digit4: 'corridor', Digit5: 'reading', Digit6: 'studyA', Digit7: 'studyB' };
 const ZONE_KO: Record<ZoneId, string> = { lounge: '라운지', corridor: '복도', reading: '열람실', studyA: '스터디룸 A', studyB: '스터디룸 B' };
@@ -103,14 +108,23 @@ let themeName = '낮';
 let follow = false;
 const updateHelp = () => {
   help.textContent = `개발용 3D 미리보기 — 테마: ${themeName} · 현재 구역: ${curZone ?? '없음(전체 밝게)'}\n`
-    + '1 낮 · 2 밤 · 3 라운지 · 4 복도 · 5 열람실 · 6 스터디룸 A · 7 스터디룸 B · 0 구역 없음\n드래그 회전 · 휠 확대/축소';
+    + '1 낮 · 2 밤 · 3 라운지 · 4 복도 · 5 열람실 · 6 스터디룸 A · 7 스터디룸 B · 0 구역 없음\nF 내 캐릭터 시점 · WASD 이동 · C 가까운 자리 착석/해제 · 드래그 회전 · 휠 확대/축소';
 };
 updateHelp();
 window.addEventListener('keydown', e => {
-  if (e.code === 'KeyF') {
-    follow = !follow;
-    dist = follow ? 5 : 18;
-    pitch = follow ? 0.45 : 0.95;
+  if (e.code === 'KeyF') { follow = !follow; if (!follow) { seated = null; rig.setSeatedView(null); } return; }
+  if (e.code === 'KeyC') {
+    if (seated) { seated = null; rig.setSeatedView(null); walker.rig.setPose('stand'); }
+    else {
+      const p = walker.rig.root.position;
+      let best: Seat | null = null, bd = Infinity;
+      for (const s of MAP.seats) { const d = Math.hypot(s.x - p.x, s.z - p.z); if (d < bd) { bd = d; best = s; } }
+      if (best) {
+        seated = best; follow = true; rig.setSeatedView(best);
+        p.set(best.x, 0, best.z); walker.rig.root.rotation.y = best.facing; walker.rig.setPose('sit');
+        walker.view.x = best.x; walker.view.z = best.z;
+      }
+    }
     return;
   }
   if (e.code === 'Digit1') { blender.setTarget(DAY); themeName = '낮'; }
@@ -146,7 +160,19 @@ ctx.onFrame((dtMs) => {
     a.label.setOpacity(0.55 + 0.45 * f);
   }
 
-  if (follow) want.set(walker.rig.root.position.x, 1.0, walker.rig.root.position.z);
+  if (!seated) {
+    const r = stepMovement(walker.view, input.axis(), rig.yaw, dtMs / 1000, walkBlocked);
+    walker.view.x = r.x; walker.view.z = r.z;
+    walker.rig.root.position.set(r.x, 0, r.z);
+    if (r.moving) walker.rig.root.rotation.y = r.ry;
+    walker.rig.setPose(r.moving ? 'walk' : 'stand');
+  }
+  if (follow) {
+    myPos.set(walker.rig.root.position.x, 0, walker.rig.root.position.z);
+    rig.follow(myPos, dtMs, occluders());
+    return;
+  }
+  rig.yaw = yaw; // WASD stays camera-relative in orbit mode
   target.lerp(want, Math.min(1, dtMs / 250));
   const cam = ctx.camera;
   cam.position.set(

@@ -4,7 +4,8 @@
   "type": "module",
   "workspaces": [
     "shared",
-    "server"
+    "server",
+    "client"
   ],
   "engines": {
     "node": ">=24"
@@ -12,10 +13,14 @@
   "scripts": {
     "test": "vitest run",
     "start": "tsx server/src/main.ts",
-    "admin": "tsx server/src/admin.ts"
+    "admin": "tsx server/src/admin.ts",
+    "dev": "concurrently -n server,client \"tsx watch server/src/main.ts\" \"npm run dev -w @studyverse/client\"",
+    "build": "tsc --noEmit -p client && vite build client"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "concurrently": "^9",
+    "jsdom": "^27"
   }
 }

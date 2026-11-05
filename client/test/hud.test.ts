@@ -40,6 +40,18 @@ describe('Hud', () => {
     expect(root.querySelector('button')).toBeNull();
   });
 
+  test('toast returns a dismiss handle (greeting accepted with E closes its toast)', () => {
+    const hud = new Hud(root);
+    const onClick = vi.fn();
+    const close = hud.toast([{ strong: '지우' }, '님이 인사했어요 👋'], 5000, { label: '인사 받기', onClick });
+    expect(typeof close).toBe('function');
+    close();
+    vi.advanceTimersByTime(500);
+    expect(root.textContent).not.toContain('인사했어요');
+    expect(onClick).not.toHaveBeenCalled();
+    close(); // idempotent
+  });
+
   test('zone, focus, today time and prompt pills', () => {
     const hud = new Hud(root);
     hud.setZone('studyA');

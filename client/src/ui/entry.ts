@@ -1,5 +1,5 @@
 import { DEFAULT_BREAK_MINUTES, HAIR_STYLES, validateNickname, type HairStyle, type Profile } from '@studyverse/shared';
-import { newAnonId } from '../profile';
+import { DEFAULT_APPEARANCE, newAnonId } from '../profile';
 
 export const HAIR_COLORS = ['#3b2a20', '#6b4423', '#a0622d', '#d9a441', '#c9503c', '#8a8d99'];
 export const SHIRT_COLORS = ['#e8837a', '#f2b05e', '#f0d567', '#8fc28a', '#6fb7b0', '#7fa6d9', '#a995d6', '#e5a3c4'];
@@ -17,7 +17,7 @@ export function showEntry(root: HTMLElement, initial: Profile | null): Promise<P
     const base: Profile = initial ?? {
       anonId: newAnonId(),
       nickname: '',
-      appearance: { hair: 'short', hairColor: HAIR_COLORS[0], shirtColor: SHIRT_COLORS[0] },
+      appearance: { ...DEFAULT_APPEARANCE },
       breakMinutes: DEFAULT_BREAK_MINUTES,
     };
     let hair: HairStyle = base.appearance.hair;

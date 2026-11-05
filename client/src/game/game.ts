@@ -66,6 +66,7 @@ export class Game {
   private today!: TodayStats;
   private myToday = { sec: 0, day: '' };
   private pending = new PendingGreet();
+  private closeGreetToast: (() => void) | null = null;
   private breakAlertedFor: number | null = null;
   private standPending = false;
   private sitPending = false;
@@ -195,7 +196,8 @@ export class Game {
     this.on('wave', ({ id }) => (id === this.selfId ? this.myAvatar.rig.wave() : this.remotes.wave(id)));
     this.on('greeted', ({ fromId, fromNick }) => {
       this.pending.set(fromId, Date.now());
-      this.hud.toast([{ strong: fromNick }, '님이 인사했어요 👋'], GREET_TOAST_MS,
+      this.closeGreetToast?.();
+      this.closeGreetToast = this.hud.toast([{ strong: fromNick }, '님이 인사했어요 👋'], GREET_TOAST_MS,
         { label: '인사 받기', onClick: () => this.acceptGreet(fromId) });
     });
     this.on('today', (s) => this.onToday(s));
@@ -337,14 +339,19 @@ export class Game {
       case 'stand': return this.standUp(nowMs);
       case 'acceptGreet': return this.acceptGreet(p.fromId);
       case 'greet':
+        this.mover.flush(nowMs, this.me); // the server measures the distance from my latest position
         sock.emit('greet', (r) => {
           if (!r.ok && r.reason === 'cooldown') this.hud.toast(['잠깐 후에 다시 인사할 수 있어요'], NOTE_MS);
         });
         return;
       case 'machine':
-        return this.lounge.openDrinkMenu(p.id, (drink) => sock.emit('drink', { drink }, (r) => {
-          if (!r.ok) this.hud.toast(['음료 기계 가까이에서 다시 골라 주세요'], NOTE_MS);
-        }));
+        this.mover.flush(nowMs, this.me);
+        return this.lounge.openDrinkMenu(p.id, (drink) => {
+          this.mover.flush(performance.now(), this.me);
+          sock.emit('drink', { drink }, (r) => {
+            if (!r.ok) this.hud.toast(['음료 기계 가까이에서 다시 골라 주세요'], NOTE_MS);
+          });
+        });
       case 'radio': return this.lounge.openRadioMenu(this.radio.current(), (k) => this.radio.play(k));
       case 'board': return this.lounge.openBoard(this.today);
       case 'focusBlocked': return;
@@ -372,7 +379,11 @@ export class Game {
   }
 
   private acceptGreet(fromId: string): void {
-    if (this.pending.take(Date.now(), fromId)) this.conn.socket.emit('greetAccept', { fromId });
+    if (isFocus(this.myView)) return; // focused: greetings are not taken (the server ignores them too)
+    if (!this.pending.take(Date.now(), fromId)) return;
+    this.conn.socket.emit('greetAccept', { fromId });
+    this.closeGreetToast?.();
+    this.closeGreetToast = null;
   }
 
   private promptNote(p: Prompt | null): string | null {

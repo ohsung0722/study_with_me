@@ -86,8 +86,8 @@ export class Hud {
     if (note) div('hud-prompt-note', this.prompt).textContent = note;
   }
 
-  /** Toast for `ms`. Strings are plain text; `{ strong }` parts are bold (still text). */
-  toast(parts: (string | { strong: string })[], ms: number, action?: { label: string; onClick(): void }): void {
+  /** Toast for `ms`. Strings are plain text; `{ strong }` parts are bold (still text). Returns a dismiss handle. */
+  toast(parts: (string | { strong: string })[], ms: number, action?: { label: string; onClick(): void }): () => void {
     const doc = this.toasts.ownerDocument;
     const t = div('hud-toast', this.toasts);
     const body = div('hud-toast-text', t);
@@ -122,6 +122,7 @@ export class Hud {
     timer = setTimeout(dismiss, ms);
     const live = [...this.toasts.children].filter(c => !c.classList.contains('leaving'));
     if (live.length > MAX_TOASTS) live[0].remove();
+    return dismiss;
   }
 
   dispose(): void {

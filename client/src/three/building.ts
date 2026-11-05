@@ -33,6 +33,11 @@ const LOUNGE_LIGHT_I = 10;    // full-night intensity (× night × lounge dim fa
 const LOUNGE_LIGHT_DIST = 8;
 const LOUNGE_LIGHT_DECAY = 1.1;
 const LOUNGE_SHADE = 0xf3e3c3;
+// One warm pendant over each study-room table, also on only at night.
+const PENDANT_Y = 2.0;        // bottom of the cord / top of the shade
+const PENDANT_I = 8;          // full-night intensity (× night × that room's dim factor)
+const PENDANT_DIST = 5;       // short range: stays inside its room (the other table is 6 m away)
+const PENDANT_DECAY = 1.1;
 const WALL_H = MAP.wallHeight;
 const DESK_H = 0.75;
 const RAIN_DROPS = 160;
@@ -256,6 +261,16 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     loungeLightSpots.push(new THREE.Vector3(l.x, l.baseY + poleH, l.z));
   }
 
+  // Study-room pendants: cord into the room's metal bucket; shade gets its own material (dimmed per room).
+  const pendants: { zone: ZoneId; shade: THREE.BufferGeometry; pos: THREE.Vector3 }[] = [];
+  for (const pr of MAP.props.filter(pp => pp.kind === 'table')) {
+    const cx = (pr.x1 + pr.x2) / 2, cz = (pr.z1 + pr.z2) / 2, zone = zoneOf(cx, cz);
+    put(zone, 'metal', new THREE.CylinderGeometry(0.008, 0.008, WALL_H - PENDANT_Y, 6), cx, (WALL_H + PENDANT_Y) / 2, cz);
+    const shade = new THREE.CylinderGeometry(0.07, 0.3, 0.22, 24, 1, true);
+    shade.translate(cx, PENDANT_Y - 0.11, cz);
+    pendants.push({ zone, shade, pos: new THREE.Vector3(cx, PENDANT_Y - 0.25, cz) });
+  }
+
   // ---------- materials + merged meshes ----------
   const themedMats: { m: THREE.MeshStandardMaterial; zone: ZoneId; role: ThemedRole }[] = [];
   for (const b of buckets.values()) {
@@ -314,6 +329,18 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
   loungeShades.name = 'loungeLampShades';
   root.add(loungeShades);
   dim.register('lounge', loungeShadeMat);
+  const pendantLamps = pendants.map(pd => {
+    const mat = new THREE.MeshStandardMaterial({ color: LOUNGE_SHADE, side: THREE.DoubleSide, roughness: 0.6 });
+    const shade = new THREE.Mesh(pd.shade, mat);
+    shade.name = `pendant:${pd.zone}`;
+    root.add(shade);
+    dim.register(pd.zone, mat);
+    const light = new THREE.PointLight(0xffffff, 0, PENDANT_DIST, PENDANT_DECAY);
+    light.position.copy(pd.pos);
+    light.visible = false;
+    root.add(light);
+    return { zone: pd.zone, mat, light };
+  });
   const loungeLights = loungeLightSpots.map(pos => {
     const pl = new THREE.PointLight(0xffffff, 0, LOUNGE_LIGHT_DIST, LOUNGE_LIGHT_DECAY);
     pl.position.copy(pos);
@@ -394,6 +421,12 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
       pl.intensity = LOUNGE_LIGHT_I * night * fl;
       pl.visible = night > 0.01;
     }
+    for (const { zone, mat, light } of pendantLamps) {
+      const f = dim.factor(zone);
+      mat.emissiveIntensity = night * 0.9 * f;
+      light.intensity = PENDANT_I * night * f;
+      light.visible = night > 0.01;
+    }
   };
 
   return {
@@ -405,7 +438,8 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
       dim.setBase(shadeMat, t.lamp);
       shadeMat.emissive.setHex(t.lamp);
       loungeShadeMat.emissive.setHex(t.lamp);
-      for (const pl of [...lampLights, ...loungeLights]) pl.color.setHex(t.lamp);
+      for (const { mat } of pendantLamps) mat.emissive.setHex(t.lamp);
+      for (const pl of [...lampLights, ...loungeLights, ...pendantLamps.map(pp => pp.light)]) pl.color.setHex(t.lamp);
       lampI = t.lampI;
       night = t.rain;
       applyLampLevels();

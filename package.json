@@ -15,7 +15,7 @@
     "start": "tsx server/src/main.ts",
     "admin": "tsx server/src/admin.ts",
     "dev": "concurrently -n server,client \"tsx watch server/src/main.ts\" \"npm run dev -w @studyverse/client\"",
-    "build": "tsc --noEmit -p client && vite build client"
+    "build": "tsc --noEmit -p shared && tsc --noEmit -p server && tsc --noEmit -p client && vite build client"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

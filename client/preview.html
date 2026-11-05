@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Studyverse 3D 미리보기 (개발용)</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #111; font-family: sans-serif; }
+      #view { position: fixed; inset: 0; }
+      #help { position: fixed; left: 12px; top: 12px; padding: 8px 12px; border-radius: 10px; background: rgba(20,20,30,.78);
+        color: #fff; font-size: 13px; line-height: 1.6; pointer-events: none; white-space: pre; }
+    </style>
+  </head>
+  <body>
+    <div id="view"></div>
+    <div id="help"></div>
+    <script type="module" src="/src/preview.ts"></script>
+  </body>
+</html>

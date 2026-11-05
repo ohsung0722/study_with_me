@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
 import {
-  LIGHT_POOL_SIZE, POOL_FADE_MS, POOL_PICK_MS, LightPool, LightPoolState, assignSlots, lampScore, selectLamps,
+  HELD_BONUS, LIGHT_POOL_SIZE, POOL_FADE_MS, POOL_PICK_MS, LightPool, LightPoolState, assignSlots, lampScore, selectLamps,
   type LampSource,
 } from '../src/three/lightPool';
 
@@ -48,6 +48,17 @@ describe('selectLamps', () => {
   });
 });
 
+describe('selectLamps hysteresis', () => {
+  test('a lamp already in a slot gets a ×1.2 score bonus', () => {
+    expect(HELD_BONUS).toBe(1.2);
+    const lamps = [src(0, 0, 2), src(2, 0, 2)];
+    expect(selectLamps(lamps, 1.05, 0, 1)).toEqual([1]);                       // lamp 1 is slightly nearer
+    const slots = [{ src: 0, next: 0, intensity: 2 }];
+    expect(selectLamps(lamps, 1.05, 0, 1, [], slots)).toEqual([0]);           // … but lamp 0 holds its slot
+    expect(selectLamps(lamps, 1.6, 0, 1, [], slots)).toEqual([1]);            // a clear winner still takes over
+  });
+});
+
 describe('assignSlots', () => {
   const slot = (src: number, next: number, intensity: number) => ({ src, next, intensity });
 
@@ -65,6 +76,13 @@ describe('assignSlots', () => {
     assignSlots(slots, [3]);
     expect(slots[1].next).toBe(3);
     expect(slots[0].next).toBe(-1);
+  });
+
+  test('a picked lamp reclaims the still-bright slot sitting on it, even if that slot was heading elsewhere', () => {
+    const slots = [slot(3, 5, 0.8), slot(-1, -1, 0)]; // slot 0 is fading out at lamp 3 on its way to lamp 5
+    assignSlots(slots, [3, 5]);
+    expect(slots[0].next).toBe(3); // back to lamp 3, no second slot ramping up there
+    expect(slots[1].next).toBe(5);
   });
 
   test('prefers a dark free slot over one that is still fading out elsewhere', () => {
@@ -140,6 +158,39 @@ describe('LightPoolState', () => {
     run(pool, lamps, 0, 0, 1000);
     expect(pool.slots[0].intensity).toBe(0);
     expect(pool.active()).toBe(0);
+  });
+
+  test('focus jittering between two equally good lamps does not make the slot swap', () => {
+    const pool = new LightPoolState(1);
+    const lamps = [src(0, 0, 3), src(2, 0, 3)];
+    run(pool, lamps, 0.9, 0, 1000);
+    expect(pool.slots[0].src).toBe(0);
+    for (let k = 0; k < 40; k++) run(pool, lamps, k % 2 ? 1.08 : 0.92, 0, POOL_PICK_MS);
+    expect(pool.slots[0].src).toBe(0);
+    expect(pool.slots[0].next).toBe(0);
+  });
+
+  test('never two slots on one lamp while the focus wanders back and forth', () => {
+    const pool = new LightPoolState(3);
+    const lamps = row(12);
+    for (let t = 0; t < 20_000; t += 16) {
+      const fx = 5.5 + 5 * Math.sin(t / 700) + (t % 160 < 80 ? 0.3 : -0.3);
+      pool.update(lamps, fx, 0, 16);
+      const lit = pool.slots.filter((sl) => sl.intensity > 0 && sl.src >= 0).map((sl) => sl.src);
+      expect(new Set(lit).size).toBe(lit.length);
+      const wanted = pool.slots.filter((sl) => sl.next >= 0).map((sl) => sl.next);
+      expect(new Set(wanted).size).toBe(wanted.length);
+    }
+  });
+
+  test('share() sums every slot on the lamp (capped at 1)', () => {
+    const pool = new LightPoolState(2);
+    const lamps = [src(0, 0, 2)];
+    pool.slots[0].src = 0; pool.slots[0].intensity = 0.5;
+    pool.slots[1].src = 0; pool.slots[1].intensity = 1;
+    expect(pool.share(0, lamps)).toBeCloseTo(0.75);
+    pool.slots[1].intensity = 2;
+    expect(pool.share(0, lamps)).toBe(1);
   });
 
   test('share(): how much of a lamp the pool light carries (the fake glow takes the rest)', () => {

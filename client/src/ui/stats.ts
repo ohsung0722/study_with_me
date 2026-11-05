@@ -1,7 +1,10 @@
-// Dev stats overlay (?stats=1): fps, frame time, draw calls, triangles, pixel ratio, quality tier, active pool lights.
+// Stats overlay (?stats=1, also in production for field diagnostics): render fps (from the time between rendered
+// frames), rAF fps (ticks per second), the quality controller's tick sample, draw calls, triangles, pixel ratio,
+// quality tier and active pool lights.
 export interface StatsSample {
-  fps: number;
-  frameMs: number;
+  renderFps: number;
+  rafFps: number;
+  tickMs: number;   // the adaptive-quality sample: rendered tick → next rAF tick
   calls: number;
   triangles: number;
   pixelRatio: number;
@@ -13,10 +16,16 @@ export function statsEnabled(search: string): boolean {
   return new URLSearchParams(search).get('stats') === '1';
 }
 
+/** Frames per second from the summed intervals between `n` consecutive rendered frames. */
+export function renderFps(intervalSumMs: number, n: number): number {
+  return n > 0 && intervalSumMs > 0 ? (1000 * n) / intervalSumMs : 0;
+}
+
 export function formatStats(s: StatsSample): string {
   return [
-    `fps ${Math.round(s.fps)}`,
-    `frame ${s.frameMs.toFixed(1)} ms`,
+    `render fps ${Math.round(s.renderFps)}`,
+    `raf fps ${Math.round(s.rafFps)}`,
+    `tick ${s.tickMs.toFixed(1)} ms`,
     `calls ${s.calls}`,
     `tris ${(s.triangles / 1000).toFixed(1)}k`,
     `ratio ${s.pixelRatio.toFixed(2)}`,

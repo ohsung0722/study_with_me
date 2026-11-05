@@ -165,3 +165,29 @@ Final per-state difference: RMSE of 6×3 grid-cell mean colours, 0–255 sRGB, w
 - **The pixel-ratio cap is read once at start.** Moving the window to a monitor with a different DPR keeps the old cap.
 - **Spec item 2 was extended.** The lamp fill and sheen were added to keep the approved look. They are cheap (per-material uniforms plus vertex-colour writes), but they are beyond the letter of the spec.
 - **The 'low' tier switch is unit-tested only as a decision.** The actual switch (shadow map off plus a recompile) was not triggered in the browser.
+
+## Fix round 1
+
+Review findings 1–7. Most were done test-first; the `dropShadows` and `buildingLights` tests were written alongside the code.
+
+| # | Change | Tests |
+|---|---|---|
+| 1 | **Thresholds relative to the display refresh.** New pure `qualitySample(q, sampleMs, refreshMs)` in `quality.ts` is the loop's whole sample→threshold wiring (`scene.ts` calls only this). Fast threshold = `max(13, 1.1·refresh)`, slow threshold = `max(22, 1.25·refresh)`. `stepQuality` takes the slow threshold as a parameter. The refresh used is capped at `MAX_REFRESH_MS = 34` (≈30 Hz) so that a GPU-bound display that manages only every 3rd vsync still steps down. | `quality.test.ts` +6: 33.3 ms samples / 33.3 ms refresh → no ratio or tier change for 120 s; 40 and 48 Hz hold; 40 ms / 16.7 ms steps down; a vsync-bound 60 Hz display steps back up; the cap; unknown refresh → absolute thresholds |
+| 2 | **Pool hysteresis.** `selectLamps(…, slots)` gives lamps already held by a slot a ×`HELD_BONUS` (1.2) score. `assignSlots` lets a picked lamp reclaim a still-bright slot sitting on it, even one heading to another lamp, so two slots never light one lamp. `share()` sums all slots on a lamp, capped at 1. | `lightPool.test.ts` +5: bonus; reclaim; focus jitter between two equal lamps causes no swap; never two slots on one lamp over a 20 s wandering focus; `share()` sums |
+| 3 | **`RefreshEstimator` uses a low percentile.** It now takes the 10th percentile of a 120-tick ring, recomputed every 30 ticks without allocating, instead of the raw minimum. The first estimate comes after 30 ticks (≈1 s at 30 Hz), before the first 1.5 s quality window. | `frameCap.test.ts` +2: one 3 ms outlier among 16.7 ms ticks; 30 Hz read within 30 ticks |
+| 4 | **Low tier frees the shadow map.** It is now an exported `dropShadows()`: shadow map off, `castShadow` off, `key.shadow.dispose()` and `map = null`, then every material flagged for recompile. | new `scene.test.ts` (1) |
+| 5 | **Integration test.** `buildBuilding` + pool (jsdom, canvas 2D stubbed) under DAY, NIGHT and a dimmed lounge: ≤ 6 point lights, all `visible`; 6 lit by day in the reading room; the 5 lounge lamps take pool lights at night and none by day; `glow:reading` vertex colours scale between f² and f with the dim factor and return on un-dim. | new `buildingLights.test.ts` (3) |
+| 6 | **Fewer per-frame allocations.** `RemotePlayers.views()` refills one reused array. `pickPrompt` returns frozen shared constants for stand / focusBlocked / coffee / vending / radio / board. Indexed loops replace `for…of` in `building.ts` update (glows, fills, rain) and in `LightPoolState` (update / share / active / assignSlots). | `interact.test.ts` +1 (same frozen object), new `remotePlayers.test.ts` (1) |
+| 7 | **Stats overlay labels.** It stays behind `?stats=1` in production and now shows `render fps` (1000 / mean interval between rendered frames), `raf fps` (ticks per second) and `tick ms` (the controller's sample). | `stats.test.ts` +1 (`renderFps`), formatting updated |
+
+**Commands:**
+```
+npm test       → Test Files 46 passed (46) · Tests 309 passed (309)   (no warnings/stderr)
+npm run build  → tsc shared/server/client clean; vite: ✓ 81 modules transformed … ✓ built in 166ms (no warnings)
+```
+
+**Preview.** The page was already open at `/preview.html?stats=1` (the dev server and tab were already running; I didn't start or stop them) and reloaded with the new code: no console errors. Overlay (pane hidden, throttled): `render fps 4 | raf fps 7 | tick 257.5 ms | calls 188 | tris 158.7k | ratio 1.00 | tier high | lights 6`. The throttled ~250 ms+ ticks are ignored by the controller.
+
+**Remaining trade-offs:**
+- rAF timing alone can't tell a 30–34 Hz display from a 60 Hz GPU that consistently needs exactly 2 vsyncs per frame. In the second case the controller now holds instead of stepping down. The p10 estimator still finds 16.7 ms whenever ≥ 10 % of ticks land on a single vsync, so only perfectly steady 2-vsync rendering is affected.
+- Still allocating per frame: `pickPrompt`'s `filter`s / `Set` and `Map` iterators in `RemotePlayers`.

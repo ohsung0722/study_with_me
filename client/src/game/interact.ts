@@ -9,6 +9,14 @@ export type Prompt =
   | { kind: 'machine'; id: 'coffee' | 'vending'; text: 'E 음료 고르기' } | { kind: 'radio'; text: 'E 배경음 바꾸기' }
   | { kind: 'board'; text: 'E 기록판 보기' } | { kind: 'acceptGreet'; fromId: string; text: 'E 인사 받기' };
 
+// Prompts without dynamic fields: shared frozen constants, so the per-frame pick doesn't allocate them.
+const STAND: Prompt = Object.freeze({ kind: 'stand', text: 'E 일어나기' });
+const FOCUS_BLOCKED: Prompt = Object.freeze({ kind: 'focusBlocked', text: '🔒 집중 중' });
+const COFFEE: Prompt = Object.freeze({ kind: 'machine', id: 'coffee', text: 'E 음료 고르기' });
+const VENDING: Prompt = Object.freeze({ kind: 'machine', id: 'vending', text: 'E 음료 고르기' });
+const RADIO: Prompt = Object.freeze({ kind: 'radio', text: 'E 배경음 바꾸기' });
+const BOARD: Prompt = Object.freeze({ kind: 'board', text: 'E 기록판 보기' });
+
 const isFocus = (p: PlayerView) => p.status.kind === 'studying' && p.status.focus;
 const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -32,7 +40,7 @@ export function pickPrompt(me: PlayerView, others: PlayerView[], pendingGreetFro
   const accept: Prompt | null = pendingGreetFrom && !meFocus
     ? { kind: 'acceptGreet', fromId: pendingGreetFrom, text: 'E 인사 받기' }
     : null;
-  if (me.seatId) return accept ?? { kind: 'stand', text: 'E 일어나기' };
+  if (me.seatId) return accept ?? STAND;
   if (accept) return accept;
 
   const myZone = zoneAt(me.x, me.z);
@@ -40,9 +48,10 @@ export function pickPrompt(me: PlayerView, others: PlayerView[], pendingGreetFro
   const fixture = nearest(me, MAP.interactables.filter(i => zoneAt(i.x, i.z) === myZone), INTERACT_RANGE);
   if (fixture) {
     switch (fixture.id) {
-      case 'coffee': case 'vending': return { kind: 'machine', id: fixture.id, text: 'E 음료 고르기' };
-      case 'radio': return { kind: 'radio', text: 'E 배경음 바꾸기' };
-      case 'board': return { kind: 'board', text: 'E 기록판 보기' };
+      case 'coffee': return COFFEE;
+      case 'vending': return VENDING;
+      case 'radio': return RADIO;
+      case 'board': return BOARD;
     }
   }
 
@@ -55,6 +64,6 @@ export function pickPrompt(me: PlayerView, others: PlayerView[], pendingGreetFro
   const people = others.filter(o => o.id !== me.id && !o.isNpc && zoneAt(o.x, o.z) === myZone);
   const target = nearest(me, people.filter(o => !isFocus(o)), GREET_RANGE);
   if (target) return { kind: 'greet', targetId: target.id, text: 'E 인사하기' };
-  if (nearest(me, people.filter(isFocus), GREET_RANGE)) return { kind: 'focusBlocked', text: '🔒 집중 중' };
+  if (nearest(me, people.filter(isFocus), GREET_RANGE)) return FOCUS_BLOCKED;
   return null;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  FAST_MS, MAX_SAMPLE_MS, PIXEL_RATIO_CAP, PIXEL_RATIO_FLOOR, SLOW_MS, WINDOW_MS, initialQuality, stepQuality,
+  FAST_MS, MAX_REFRESH_MS, MAX_SAMPLE_MS, PIXEL_RATIO_CAP, PIXEL_RATIO_FLOOR, SLOW_MS, WINDOW_MS, initialQuality, qualitySample, stepQuality,
   type QualityChange, type QualityState,
 } from '../src/three/quality';
 
@@ -104,5 +104,54 @@ describe('quality tier', () => {
     feed(q, 5, 120_000);
     expect(q.tier).toBe('low');
     expect(q.ratio).toBe(1.5); // resolution still recovers
+  });
+});
+
+describe('qualitySample (the scene loop wiring: thresholds relative to the display refresh)', () => {
+  /** Feed `ms` of `sampleMs` samples through qualitySample with a given refresh estimate. */
+  function run(q: QualityState, sampleMs: number, refreshMs: number, ms: number): QualityChange[] {
+    const out: QualityChange[] = [];
+    for (let t = 0; t < ms; t += sampleMs) {
+      const c = qualitySample(q, sampleMs, refreshMs);
+      if (c !== 'none') out.push(c);
+    }
+    return out;
+  }
+
+  test('vsync-bound 30 Hz cadence (33.3 ms ticks, 33.3 ms refresh): no ratio or tier change, ever', () => {
+    const q = initialQuality(2);
+    expect(run(q, 33.3, 33.3, 120_000)).toEqual([]);
+    expect(q).toMatchObject({ ratio: 1.5, tier: 'high' });
+  });
+
+  test('40–48 Hz panels: vsync-bound samples hold', () => {
+    for (const hz of [40, 48]) {
+      const q = initialQuality(2);
+      expect(run(q, 1000 / hz, 1000 / hz, 60_000)).toEqual([]);
+    }
+  });
+
+  test('40 ms samples on a 60 Hz display (16.7 ms refresh) still step down', () => {
+    const q = initialQuality(2);
+    expect(run(q, 40, 16.7, WINDOW_MS + 40)).toEqual(['ratio']);
+    expect(q.ratio).toBeLessThan(1.5);
+  });
+
+  test('a vsync-bound 60 Hz display steps back up after a dip', () => {
+    const q = initialQuality(2);
+    run(q, 40, 16.7, WINDOW_MS + 40);
+    expect(run(q, 16.7, 16.7, 3500)).toEqual(['ratio']);
+    expect(q.ratio).toBeCloseTo(1.5);
+  });
+
+  test('the refresh used for the thresholds is capped (a GPU-bound 20 fps cadence is not mistaken for a 20 Hz display)', () => {
+    expect(MAX_REFRESH_MS).toBeLessThan(40);
+    const q = initialQuality(2);
+    expect(run(q, 50, 50, WINDOW_MS + 50)).toEqual(['ratio']);
+  });
+
+  test('unknown refresh (0) falls back to the absolute thresholds', () => {
+    const q = initialQuality(2);
+    expect(run(q, 30, 0, WINDOW_MS + 30)).toEqual(['ratio']);
   });
 });

@@ -78,3 +78,15 @@ describe('pickPrompt', () => {
     expect(pickPrompt(pv(6.5, 1.2), [], null)).toEqual({ kind: 'board', text: 'E 기록판 보기' });
   });
 });
+
+describe('pickPrompt allocations', () => {
+  test('prompts without dynamic fields are shared constants (no per-frame object)', () => {
+    const seated = pv(R01.x, R01.z, { seatId: 'R01' });
+    const a = pickPrompt(seated, [], null), b = pickPrompt(seated, [], null);
+    expect(a).toEqual({ kind: 'stand', text: 'E 일어나기' });
+    expect(a).toBe(b);
+    expect(Object.isFrozen(a)).toBe(true);
+    const nearRadio = pv(6.5, 22.2);
+    expect(pickPrompt(nearRadio, [], null)).toBe(pickPrompt(nearRadio, [], null));
+  });
+});

@@ -5,8 +5,8 @@ import * as THREE from 'three';
 import { MAP } from '@studyverse/shared';
 import type { Theme } from './theme';
 import { FrameGate, RefreshEstimator } from './frameCap';
-import { FAST_MS, initialQuality, stepQuality, type Tier } from './quality';
-import { StatsOverlay, statsEnabled } from '../ui/stats';
+import { initialQuality, qualitySample, type Tier } from './quality';
+import { StatsOverlay, renderFps, statsEnabled } from '../ui/stats';
 
 export type FrameCallback = (dtMs: number, nowMs: number) => void;
 
@@ -26,6 +26,22 @@ export interface SceneCtx {
 const MAX_DT_MS = 100;        // a stalled/hidden tab must not produce a huge step
 const SHADOW_MAP_SIZE = 1024; // 'high' tier; 'low' has no shadows
 const STATS_MS = 500;
+
+/**
+ * The 'low' tier: shadows off for good. Disables the shadow map, stops the key light casting, frees its shadow map
+ * render target and flags every material for its one-time recompile.
+ */
+export function dropShadows(shadowMap: { enabled: boolean }, key: THREE.DirectionalLight, scene: THREE.Object3D): void {
+  shadowMap.enabled = false;
+  key.castShadow = false;
+  key.shadow.dispose();
+  key.shadow.map = null;
+  scene.traverse((o) => {
+    const m = (o as THREE.Mesh).material;
+    if (!m) return;
+    for (const mat of Array.isArray(m) ? m : [m]) mat.needsUpdate = true;
+  });
+}
 
 export function createScene(container: HTMLElement): SceneCtx {
   const dpr = window.devicePixelRatio || 1;
@@ -54,14 +70,7 @@ export function createScene(container: HTMLElement): SceneCtx {
   scene.add(amb, key, key.target);
 
   const applyTier = (tier: Tier) => {
-    if (tier !== 'low') return;
-    renderer.shadowMap.enabled = false; // one-time recompile of every material
-    key.castShadow = false;
-    scene.traverse((o) => {
-      const m = (o as THREE.Mesh).material;
-      if (!m) return;
-      for (const mat of Array.isArray(m) ? m : [m]) mat.needsUpdate = true;
-    });
+    if (tier === 'low') dropShadows(renderer.shadowMap, key, scene);
   };
 
   const resize = () => {
@@ -78,24 +87,27 @@ export function createScene(container: HTMLElement): SceneCtx {
 
   // ---------- stats overlay (?stats=1) ----------
   const overlay = statsEnabled(location.search) ? new StatsOverlay(document.body) : null;
-  let statFrom = 0, statFrames = 0, statWorkSum = 0, statWorkN = 0;
+  let statFrom = 0, statTicks = 0, statWorkSum = 0, statWorkN = 0, statRenderSum = 0, statRenderN = 0, lastRendered = 0;
   const countLights = () => {
     let n = 0;
     scene.traverse((o) => { if ((o as THREE.PointLight).isPointLight && (o as THREE.PointLight).intensity > 0) n++; });
     return n;
   };
+  /** Called after each render. */
   const showStats = (now: number) => {
     if (!overlay) return;
-    statFrames++;
+    if (lastRendered) { statRenderSum += now - lastRendered; statRenderN++; }
+    lastRendered = now;
     if (!statFrom) statFrom = now;
     if (now - statFrom < STATS_MS) return;
     overlay.show({
-      fps: (statFrames * 1000) / (now - statFrom), frameMs: statWorkN ? statWorkSum / statWorkN : 0,
+      renderFps: renderFps(statRenderSum, statRenderN), rafFps: (statTicks * 1000) / (now - statFrom),
+      tickMs: statWorkN ? statWorkSum / statWorkN : 0,
       calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
       pixelRatio: renderer.getPixelRatio(), tier: quality.tier, lights: countLights(),
     });
     statFrom = now;
-    statFrames = statWorkSum = statWorkN = 0;
+    statTicks = statWorkSum = statWorkN = statRenderSum = statRenderN = 0;
   };
 
   // ---------- loop ----------
@@ -110,15 +122,16 @@ export function createScene(container: HTMLElement): SceneCtx {
     raf = requestAnimationFrame(loop);
     if (lastTick) refresh.observe(now - lastTick);
     lastTick = now;
-    // Frame time = from a rendered tick to the next tick: our work plus however long the browser/GPU held the
-    // next frame back. On a display slower than FAST_MS per refresh, being vsync-bound counts as fast.
+    statTicks++;
+    // Tick sample = from a rendered tick to the next tick: our work plus however long the browser/GPU held the
+    // next frame back. Thresholds are relative to the display refresh, so being vsync-bound never counts as slow.
     if (renderedAt >= 0) {
       const sample = now - renderedAt;
       renderedAt = -1;
       statWorkSum += sample;
       statWorkN++;
       if (!document.hidden) {
-        const change = stepQuality(quality, sample, Math.max(FAST_MS, refresh.value() * 1.1));
+        const change = qualitySample(quality, sample, refresh.value());
         if (change === 'ratio') renderer.setPixelRatio(quality.ratio);
         else if (change === 'tier') applyTier(quality.tier);
       }
@@ -150,7 +163,7 @@ export function createScene(container: HTMLElement): SceneCtx {
     },
     start() {
       if (raf) return;
-      last = lastTick = 0;
+      last = lastTick = lastRendered = 0;
       renderedAt = -1;
       gate.reset();
       raf = requestAnimationFrame(loop);

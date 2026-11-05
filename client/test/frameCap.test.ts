@@ -51,7 +51,7 @@ describe('FrameGate (~60 fps cap)', () => {
 });
 
 describe('RefreshEstimator', () => {
-  test('tracks the display interval as the shortest recent tick interval', () => {
+  test('tracks the display interval: GPU-delayed ticks (20 ms) among vsync ticks (6.06 ms) read as 6.06', () => {
     const r = new RefreshEstimator();
     expect(r.value()).toBe(0);
     for (let i = 0; i < 200; i++) r.observe(i % 3 ? 6.06 : 20);
@@ -63,6 +63,19 @@ describe('RefreshEstimator', () => {
     for (let i = 0; i < 300; i++) r.observe(6.06);
     for (let i = 0; i < 600; i++) r.observe(16.7);
     expect(r.value()).toBeCloseTo(16.7);
+  });
+
+  test('one jittery short interval does not drag the estimate down (low percentile, not the minimum)', () => {
+    const r = new RefreshEstimator();
+    for (let i = 0; i < 200; i++) r.observe(i === 100 ? 3 : 16.7 + (i % 3) * 0.2);
+    expect(r.value()).toBeGreaterThanOrEqual(16.7);
+    expect(r.value()).toBeLessThan(17);
+  });
+
+  test('a 30 Hz cadence (battery saver) reads as ~33 ms within ~1 s of ticks', () => {
+    const r = new RefreshEstimator();
+    for (let i = 0; i < 30; i++) r.observe(i % 7 ? 33.3 : 34.5);
+    expect(r.value()).toBeCloseTo(33.3);
   });
 
   test('ignores nonsense intervals', () => {

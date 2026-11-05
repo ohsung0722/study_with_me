@@ -8,7 +8,8 @@ export const LIGHT_POOL_SIZE = 6;
 export const POOL_PICK_MS = 150;  // how often the lamps are re-picked
 export const POOL_FADE_MS = 250;  // a slot's intensity settles over about this long
 const FADE_TAU_MS = POOL_FADE_MS / 3; // exponential easing: ~95 % after POOL_FADE_MS
-const DARK = 0.02;                // below this a fading slot counts as off (and may jump to its next lamp)
+const DARK = 0.02;
+export const HELD_BONUS = 1.2;    // score bonus for a lamp that already has a slot (hysteresis: no swapping on jitter)                // below this a fading slot counts as off (and may jump to its next lamp)
 
 /** A lamp that can borrow a pool light. `intensity` is its current light intensity (theme × zone dim); 0 = off. */
 export interface LampSource {
@@ -29,12 +30,27 @@ export function lampScore(s: LampSource, fx: number, fz: number): number {
 
 const topScores: number[] = [];
 
-/** Indices of the (up to) n highest-scoring lit lamps, best first; ties go to the lower index. Fills and returns `out`. */
-export function selectLamps(sources: readonly LampSource[], fx: number, fz: number, n: number, out: number[] = []): number[] {
+/** Does a slot serve (or still light) lamp i? */
+function held(slots: readonly PoolSlot[] | undefined, i: number): boolean {
+  if (!slots) return false;
+  for (let k = 0; k < slots.length; k++) {
+    const s = slots[k];
+    if (s.next === i || (s.src === i && s.intensity > 0)) return true;
+  }
+  return false;
+}
+
+/**
+ * Indices of the (up to) n highest-scoring lit lamps, best first; ties go to the lower index. Fills and returns
+ * `out`. Lamps already held by one of `slots` score ×HELD_BONUS.
+ */
+export function selectLamps(sources: readonly LampSource[], fx: number, fz: number, n: number, out: number[] = [],
+  slots?: readonly PoolSlot[]): number[] {
   out.length = 0;
   topScores.length = 0;
   for (let i = 0; i < sources.length; i++) {
-    const sc = lampScore(sources[i], fx, fz);
+    let sc = lampScore(sources[i], fx, fz);
+    if (sc > 0 && held(slots, i)) sc *= HELD_BONUS;
     if (sc <= 0) continue;
     let k: number;
     if (out.length < n) { k = out.length; out.push(i); topScores.push(sc); }
@@ -56,11 +72,20 @@ function slotFor(slots: readonly PoolSlot[], lamp: number): number {
 
 /**
  * Point each slot's `next` at a picked lamp. Slots already serving a picked lamp keep it; slots whose lamp was
- * dropped are freed; newly picked lamps go to the free slot already sitting on them (no jump), else the darkest one.
+ * dropped are freed; a picked lamp reclaims a still-bright slot sitting on it (even one heading elsewhere), so two
+ * slots never light one lamp; other picked lamps go to a free slot already on them, else the darkest free one.
  */
 export function assignSlots(slots: PoolSlot[], picked: readonly number[]): void {
-  for (const s of slots) if (s.next >= 0 && picked.indexOf(s.next) < 0) s.next = -1;
-  for (const p of picked) {
+  for (let i = 0; i < slots.length; i++) if (slots[i].next >= 0 && picked.indexOf(slots[i].next) < 0) slots[i].next = -1;
+  for (let j = 0; j < picked.length; j++) {
+    const p = picked[j];
+    if (slotFor(slots, p) >= 0) continue;
+    for (let i = 0; i < slots.length; i++) {
+      if (slots[i].src === p && slots[i].intensity > 0) { slots[i].next = p; break; }
+    }
+  }
+  for (let j = 0; j < picked.length; j++) {
+    const p = picked[j];
     if (slotFor(slots, p) >= 0) continue;
     let best = -1;
     for (let i = 0; i < slots.length; i++) {
@@ -88,10 +113,11 @@ export class LightPoolState {
     this.sincePick += dtMs;
     if (this.sincePick >= POOL_PICK_MS) {
       this.sincePick = 0;
-      assignSlots(this.slots, selectLamps(sources, fx, fz, this.size, this.picked));
+      assignSlots(this.slots, selectLamps(sources, fx, fz, this.size, this.picked, this.slots));
     }
     const k = 1 - Math.exp(-Math.max(0, dtMs) / FADE_TAU_MS);
-    for (const s of this.slots) {
+    for (let i = 0; i < this.slots.length; i++) {
+      const s = this.slots[i];
       if (s.src !== s.next && s.intensity < DARK) { s.src = s.next; s.intensity = 0; } // jump only while dark
       const target = s.src >= 0 && s.src === s.next ? sources[s.src]?.intensity ?? 0 : 0;
       s.intensity += (target - s.intensity) * k;
@@ -100,18 +126,19 @@ export class LightPoolState {
     }
   }
 
-  /** Fraction (0..1) of lamp i's light currently carried by a pool light; the fake glow draws the rest. */
+  /** Fraction (0..1) of lamp i's light currently carried by pool lights (all slots on it); the fake glow draws the rest. */
   share(i: number, sources: readonly LampSource[]): number {
     const full = sources[i]?.intensity ?? 0;
     if (!(full > 0)) return 0;
-    for (const s of this.slots) if (s.src === i) return Math.min(1, s.intensity / full);
-    return 0;
+    let carried = 0;
+    for (let k = 0; k < this.slots.length; k++) if (this.slots[k].src === i) carried += this.slots[k].intensity;
+    return Math.min(1, carried / full);
   }
 
   /** Slots currently giving light. */
   active(): number {
     let n = 0;
-    for (const s of this.slots) if (s.intensity > 0) n++;
+    for (let k = 0; k < this.slots.length; k++) if (this.slots[k].intensity > 0) n++;
     return n;
   }
 }

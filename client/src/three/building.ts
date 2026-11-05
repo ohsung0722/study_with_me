@@ -497,12 +497,15 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
       zoneLevel[l.zi] += unpooled / zoneLamps[l.zi];
       // × dim factor once more: the real light's contribution also scaled with the dimmed surface colour
       const g = unpooled * dim.factor(l.zone) * glowScale, sheen = level * SHEEN[l.kind] * glowScale;
-      for (const { id, g: spec } of l.glows) glow.set(id, spec.k * g, spec.k * sheen);
+      for (let j = 0; j < l.glows.length; j++) glow.set(l.glows[j].id, l.glows[j].g.k * g, l.glows[j].g.k * sheen);
     }
     glow.flush();
     // material colours are already dimmed (× factor), so the fill scales with the factor twice, like the glow
     const dayScale = night + (1 - night) * FILL_DAY;
-    for (const f of fills) f.m.emissive.copy(f.m.color).multiply(lampColor).multiplyScalar(f.k * dayScale * zoneLevel[f.zi]);
+    for (let i = 0; i < fills.length; i++) {
+      const f = fills[i];
+      f.m.emissive.copy(f.m.color).multiply(lampColor).multiplyScalar(f.k * dayScale * zoneLevel[f.zi]);
+    }
   };
 
   return {
@@ -534,7 +537,8 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
       applyLampLevels(dtMs);
       if (rainLevel <= 0.01) return;
       const top = wy1 - 0.11, bottom = wy0 + 0.11;
-      for (const d of drops) {
+      for (let i = 0; i < drops.length; i++) {
+        const d = drops[i];
         d.y -= (d.v * dtMs) / 1000;
         if (d.y < bottom) d.y = top;
       }

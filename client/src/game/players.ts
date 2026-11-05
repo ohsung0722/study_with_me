@@ -131,6 +131,7 @@ interface Remote {
 
 export class RemotePlayers {
   private map = new Map<string, Remote>();
+  private viewsOut: PlayerView[] = [];
 
   constructor(private scene: THREE.Scene) {}
 
@@ -171,9 +172,13 @@ export class RemotePlayers {
     this.map.get(id)?.avatar.rig.wave();
   }
 
-  /** Current server views of players who are still here (leaving NPCs excluded). */
+  /**
+   * Current server views of players who are still here (leaving NPCs excluded). Returns the same array every call
+   * (refilled; no per-frame allocation): use it before the next call, don't keep it.
+   */
   views(): PlayerView[] {
-    const out: PlayerView[] = [];
+    const out = this.viewsOut;
+    out.length = 0;
     for (const r of this.map.values()) if (!r.leaving) out.push(r.view);
     return out;
   }

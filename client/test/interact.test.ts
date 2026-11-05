@@ -22,6 +22,16 @@ describe('pickPrompt', () => {
     expect(pickPrompt(seated, [pv(18.6, 3.6)], null)).toEqual({ kind: 'stand', text: 'E 일어나기' });
   });
 
+  test('pickPrompt: free seat within INTERACT_RANGE but in another zone → no sit prompt', () => {
+    // R06 sits 1.4 m from the reading room's outer wall (x=32). Just past it (zone null) is within range
+    // by distance, but the server rejects sitting across zones, so no prompt.
+    const R06 = seatById('R06')!;
+    const outside = pv(32, R06.z);
+    expect(Math.hypot(outside.x - R06.x, outside.z - R06.z)).toBeLessThanOrEqual(1.5);
+    expect(pickPrompt(outside, [], null)).toBeNull();
+    expect(pickPrompt(pv(31.9, R06.z), [], null)).toEqual({ kind: 'sit', seatId: 'R06', text: 'E 앉기' }); // same zone → sit
+  });
+
   test('pickPrompt: near focused player → focusBlocked; near normal player → greet', () => {
     const me = pv(3, 18);
     const normal = pv(4, 18);

@@ -4,11 +4,14 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Appearance, DrinkId } from '@studyverse/shared';
+import { newSipState, stepSip } from './sip';
+import { deskCupSpot } from './cupSpot';
 
 export type Pose = 'stand' | 'walk' | 'sit';
 
 export interface AvatarRig {
   root: THREE.Group;
+  /** 'sit': a held drink goes onto the desk/table in front (from the map, using root position/rotation); sofas keep it in hand. */
   setPose(p: Pose): void;
   wave(durationMs?: number): void;
   setDrink(d: DrinkId | null): void;
@@ -26,6 +29,10 @@ const BLUSH = 0xffafac; // mockup's 0xff9aa2 @ 70% over skin, baked opaque
 const LEG_LEN = 0.28, ARM_LEN = 0.26;
 const HIP_STAND = 0.32, HIP_SIT = 0.5;
 const WAVE_MS = 2200;
+const CUP_ARM_Z = -0.25;           // cup arm's resting outward tilt
+const SIP_ARM_X = -1.9, SIP_ARM_Z = 0.35; // cup just under the chin, hand pulled toward the face
+const CUP_IN_HAND: [number, number, number] = [0, -ARM_LEN - 0.02, 0.07];
+const CUP_ON_DESK_Y = 0.78 + 0.06; // desk top + half the cup
 
 const tmpColor = new THREE.Color();
 
@@ -175,6 +182,21 @@ export function createAvatar(a: Appearance): AvatarRig {
   let waveLeft = 0;
   let drink: DrinkId | null = null;
   let cup: THREE.Mesh | null = null;
+  const sip = newSipState();
+  let cupKey = '';
+
+  /** Cup in the hand, or on the desk/table in front while seated at one. Recomputed when pose/place changes. */
+  const placeCup = () => {
+    if (!cup) return;
+    const key = pose === 'sit' ? `${root.position.x},${root.position.z},${root.rotation.y}` : 'hand';
+    if (key === cupKey && cup.parent) return;
+    cupKey = key;
+    const spot = pose === 'sit' ? deskCupSpot(root.position.x, root.position.z, root.rotation.y) : null;
+    const parent = spot ? root : cupArm;
+    if (cup.parent !== parent) parent.add(cup);
+    if (spot) cup.position.set(spot.x, CUP_ON_DESK_Y, spot.z);
+    else cup.position.set(...CUP_IN_HAND);
+  };
 
   const approach = (cur: number, target: number, k: number) => cur + (target - cur) * k;
 
@@ -182,6 +204,7 @@ export function createAvatar(a: Appearance): AvatarRig {
     root,
     setPose(p) {
       pose = p;
+      placeCup();
     },
     wave(durationMs = WAVE_MS) {
       waveLeft = Math.max(waveLeft, durationMs);
@@ -196,8 +219,8 @@ export function createAvatar(a: Appearance): AvatarRig {
       if (d) {
         cup = new THREE.Mesh(cupGeo(d), material);
         cup.castShadow = true;
-        cup.position.set(0, -ARM_LEN - 0.02, 0.07);
-        cupArm.add(cup);
+        cupKey = '';
+        placeCup();
       }
     },
     setDim(f) {
@@ -221,7 +244,12 @@ export function createAvatar(a: Appearance): AvatarRig {
       }
       legs[0].rotation.x = approach(legs[0].rotation.x, legX + swing, k);
       legs[1].rotation.x = approach(legs[1].rotation.x, legX - swing, k);
-      cupArm.rotation.x = approach(cupArm.rotation.x, armX - swing, k);
+      placeCup(); // the caller may move the root after setPose('sit')
+      // occasional sip while holding a drink (not seated, not waving)
+      const lift = stepSip(sip, dtMs, cup !== null && cup.parent === cupArm && pose !== 'sit' && waveLeft === 0);
+      const cupArmX = armX - swing * (1 - lift);
+      cupArm.rotation.x = approach(cupArm.rotation.x, cupArmX + (SIP_ARM_X - cupArmX) * lift, k);
+      cupArm.rotation.z = approach(cupArm.rotation.z, CUP_ARM_Z + (SIP_ARM_Z - CUP_ARM_Z) * lift, k);
       hip.position.y = pose === 'walk' ? hipY : approach(hip.position.y, hipY, k);
       head.rotation.x = approach(head.rotation.x, headX, k);
       head.rotation.z = headZ;

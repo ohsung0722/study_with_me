@@ -21,6 +21,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 
 /* ---- in-game HUD (Task 14) — pills/toast style from the focus-dim mockup ---- */
 .hud-layer { position: fixed; inset: 0; z-index: 20; pointer-events: none; font-size: 14px; }
+.hud-layer [hidden] { display: none !important; } /* .hud-prompt is display:flex; keep the hidden attribute authoritative */
 .hud-stack { position: absolute; left: 16px; top: 16px; display: flex; flex-direction: column; gap: 6px; }
 .hud-pill { width: max-content; padding: 6px 12px; border-radius: 999px; background: rgba(20, 20, 30, 0.78); color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
 .hud-pill.hud-focus { color: #ffe2a8; }

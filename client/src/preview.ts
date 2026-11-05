@@ -59,6 +59,7 @@ const walker = addActor({ nickname: '나민수', appearance: look('short', '#4a2
 const input = new InputState(window);
 walker.rig.root.position.set(14.5, 0, 22);
 walker.view.x = 14.5; walker.view.z = 22;
+walker.rig.setDrink('americano'); // shows the occasional sip while walking and the cup on the desk when seated
 // 2) seated, focus-mode studying in the reading room
 addActor({ nickname: '지우', appearance: look('long', '#3b2a1e', '#81c784'), isNpc: false, ...seatPos('R08'), seatId: 'R08',
   status: studying(134, true) });

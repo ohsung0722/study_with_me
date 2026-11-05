@@ -235,7 +235,7 @@ export class Radio {
     if (kind === 'off') return;
     try {
       this.ctx ??= this.makeContext();
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => { /* retried on the next play() */ });
       this.voice = SOUNDS[kind](this.ctx);
     } catch {
       this.voice = null; // no Web Audio: stay silent

@@ -20,6 +20,19 @@ const THEMED: readonly ThemedRole[] = ['floor', 'wall', 'desk', 'part'];
 const FLOOR_TINT: Record<ZoneId, number> = { lounge: 1.1, corridor: 0.88, reading: 1, studyA: 1.05, studyB: 1.05 };
 
 const MAX_LAMP_LIGHTS = 24;
+// Warm lounge lamps that switch on at night. Placed inside existing collider rects (sofa shelves, counter,
+// board cabinet) or against a wall so players don't walk through them.
+const LOUNGE_LAMPS: { x: number; z: number; baseY: number; kind: 'floor' | 'table' }[] = [
+  { x: 4.2, z: 9.3, baseY: 0.6, kind: 'table' },    // on sofa 1's back shelf
+  { x: 6.8, z: 14.7, baseY: 0.6, kind: 'table' },   // on sofa 2's back shelf
+  { x: 0.4, z: 2.3, baseY: 1.0, kind: 'table' },    // coffee counter (lights the coffee/vending corner)
+  { x: 7.15, z: 0.32, baseY: 0.7, kind: 'table' },  // board cabinet (lights the record board)
+  { x: 7.3, z: 23.6, baseY: 0, kind: 'floor' },     // by the radio, against the entrance-side wall
+];
+const LOUNGE_LIGHT_I = 10;    // full-night intensity (× night × lounge dim factor)
+const LOUNGE_LIGHT_DIST = 8;
+const LOUNGE_LIGHT_DECAY = 1.1;
+const LOUNGE_SHADE = 0xf3e3c3;
 const WALL_H = MAP.wallHeight;
 const DESK_H = 0.75;
 const RAIN_DROPS = 160;
@@ -27,7 +40,7 @@ const RAIN_DROPS = 160;
 export interface Building {
   applyTheme(t: Theme): void;
   seatMarkers: Map<string, THREE.Object3D>;
-  /** Animates the rain in the lounge window. */
+  /** Animates the rain and keeps lamp glow / light intensities in step with zone dimming. Call every frame. */
   update(dtMs: number): void;
 }
 
@@ -227,6 +240,22 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     box(z, 'metal', 0.012, 0.32, 0.012, radio.x + 0.17, 0.98, radio.z, 0);
   }
 
+  // Lounge lamps: pole/base into the lounge metal bucket, shades merged into one emissive mesh below.
+  const loungeShadeGeos: THREE.BufferGeometry[] = [];
+  const loungeLightSpots: THREE.Vector3[] = [];
+  for (const l of LOUNGE_LAMPS) {
+    const z = zoneOf(l.x, l.z);
+    const poleH = l.kind === 'floor' ? 1.45 : 0.3;
+    const shadeH = l.kind === 'floor' ? 0.28 : 0.18;
+    const [rTop, rBot] = l.kind === 'floor' ? [0.15, 0.22] : [0.09, 0.13];
+    put(z, 'metal', new THREE.CylinderGeometry(rBot * 0.7, rBot * 0.8, 0.03, 16), l.x, l.baseY + 0.015, l.z);
+    put(z, 'metal', new THREE.CylinderGeometry(0.015, 0.015, poleH, 8), l.x, l.baseY + poleH / 2, l.z);
+    const shade = new THREE.CylinderGeometry(rTop, rBot, shadeH, 20, 1, true);
+    shade.translate(l.x, l.baseY + poleH + shadeH / 2 - 0.04, l.z);
+    loungeShadeGeos.push(shade);
+    loungeLightSpots.push(new THREE.Vector3(l.x, l.baseY + poleH, l.z));
+  }
+
   // ---------- materials + merged meshes ----------
   const themedMats: { m: THREE.MeshStandardMaterial; zone: ZoneId; role: ThemedRole }[] = [];
   for (const b of buckets.values()) {
@@ -274,6 +303,21 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
   const lampLights = lampSpots.slice(0, MAX_LAMP_LIGHTS).map(pos => {
     const pl = new THREE.PointLight(0xffffff, 0, 3.2, 1.6);
     pl.position.copy(pos);
+    root.add(pl);
+    return pl;
+  });
+
+  // Lounge lamps: shades (one merged mesh) + point lights, on only at night.
+  const loungeShadeMat = new THREE.MeshStandardMaterial({ color: LOUNGE_SHADE, side: THREE.DoubleSide, roughness: 0.6 });
+  const loungeShades = new THREE.Mesh(mergeGeometries(loungeShadeGeos), loungeShadeMat);
+  loungeShadeGeos.forEach(g => g.dispose());
+  loungeShades.name = 'loungeLampShades';
+  root.add(loungeShades);
+  dim.register('lounge', loungeShadeMat);
+  const loungeLights = loungeLightSpots.map(pos => {
+    const pl = new THREE.PointLight(0xffffff, 0, LOUNGE_LIGHT_DIST, LOUNGE_LIGHT_DECAY);
+    pl.position.copy(pos);
+    pl.visible = false;
     root.add(pl);
     return pl;
   });
@@ -331,7 +375,26 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
   moon.rotation.y = Math.PI / 2;
   moon.position.set(wx + 0.002, wy1 - 0.4, win.z2 - 3.2);
   root.add(moon);
+  dim.register(winZone, dropMat);
+  dim.register(winZone, moonMat);
   let rainLevel = 0;
+  let lampI = 0;
+  let night = 0; // 0 by day, 1 by night; follows the theme blend (NIGHT is the only theme with rain)
+
+  /** Light intensities and shade glow scaled by the current zone dim factors. */
+  const applyLampLevels = () => {
+    const fr = dim.factor('reading'), fl = dim.factor('lounge');
+    shadeMat.emissiveIntensity = Math.min(lampI, 1) * 0.9 * fr;
+    for (const pl of lampLights) {
+      pl.intensity = lampI * fr;
+      pl.visible = lampI > 0;
+    }
+    loungeShadeMat.emissiveIntensity = night * 0.9 * fl;
+    for (const pl of loungeLights) {
+      pl.intensity = LOUNGE_LIGHT_I * night * fl;
+      pl.visible = night > 0.01;
+    }
+  };
 
   return {
     seatMarkers,
@@ -341,18 +404,18 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
       dim.setBase(winMat, t.win);
       dim.setBase(shadeMat, t.lamp);
       shadeMat.emissive.setHex(t.lamp);
-      shadeMat.emissiveIntensity = Math.min(t.lampI, 1) * 0.9;
-      for (const pl of lampLights) {
-        pl.color.setHex(t.lamp);
-        pl.intensity = t.lampI;
-        pl.visible = t.lampI > 0;
-      }
+      loungeShadeMat.emissive.setHex(t.lamp);
+      for (const pl of [...lampLights, ...loungeLights]) pl.color.setHex(t.lamp);
+      lampI = t.lampI;
+      night = t.rain;
+      applyLampLevels();
       rainLevel = t.rain;
       dropMat.opacity = 0.55 * t.rain;
       moonMat.opacity = t.rain;
       rain.visible = moon.visible = t.rain > 0.01;
     },
     update(dtMs: number) {
+      applyLampLevels();
       if (rainLevel <= 0.01) return;
       const top = wy1 - 0.11, bottom = wy0 + 0.11;
       for (const d of drops) {

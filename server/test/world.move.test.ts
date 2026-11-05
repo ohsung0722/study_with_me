@@ -73,6 +73,15 @@ describe('World movement', () => {
     expect(out.find('toPlayer', 'correct')).toHaveLength(1);
   });
 
+  test('sit through a wall is rejected (player zone must equal seat zone)', () => {
+    const { world, clock } = setup();
+    world.join('a', prof('A', '가나다'));
+    moveAfter(world, clock, 'a', 18.6, 12.3, 0); // studyA side of the z=12 wall
+    expect(world.view('a')!.zone).toBe('studyA');
+    expect(world.sit('a', 'R19')).toEqual({ ok: false, reason: 'far' });
+    expect(world.view('a')!.seatId).toBeNull();
+  });
+
   test('move while seated is ignored', () => {
     const { world, out, clock } = setup();
     world.join('a', prof('A', '가나다'));
@@ -189,6 +198,36 @@ describe('World today stats', () => {
     clock.advance(30_000);
     const j = world.join('c', prof('C', '새사람'));
     expect(j.ok && j.today).toMatchObject({ people: 1, totalSec: 60 + 30, top5: [{ nickname: '공부왕', sec: 90 }] });
+  });
+
+  test('hidden live user is counted in people/total but absent from top5 (stored=0 and stored>0)', () => {
+    const { world, store, clock } = setup(Date.UTC(2026, 10, 5, 3, 0, 0));
+    store.upsertProfile('A', '숨은이');
+    store.upsertProfile('B', '보이는이');
+    store.addSession({ anonId: 'B', buildingId: 'main', seatId: 'R02', startMs: clock.now() - 100_000, endMs: clock.now() - 40_000 });
+    seat(world, clock, 'a', 'A', '숨은이');
+    world.join('b', prof('B', '보이는이'));
+    moveAfter(world, clock, 'b', 20.6, 3.0, 0);
+    expect(world.sit('b', 'R02')).toEqual({ ok: true });
+    store.setHidden('A', true); // flipped mid-session, e.g. by the admin CLI
+    clock.advance(30_000);
+    const j = world.join('c', prof('C', '새사람'));
+    expect(j.ok && j.today).toMatchObject({ people: 2, top5: [{ nickname: '보이는이', sec: 90 }] });
+    expect(j.ok && j.today.top5).toHaveLength(1);
+    expect(j.ok && j.today.totalSec).toBeGreaterThan(90);
+    // hidden user with stored > 0
+    store.addSession({ anonId: 'A', buildingId: 'main', seatId: 'R03', startMs: clock.now() - 500_000, endMs: clock.now() - 400_000 });
+    const k = world.join('d', prof('D', '또새사람'));
+    expect(k.ok && k.today.top5.map((e) => e.nickname)).toEqual(['보이는이']);
+    expect(k.ok && k.today.people).toBe(2);
+  });
+
+  test('a non-hidden user literally named 익명 appears in top5', () => {
+    const { world, clock } = setup(Date.UTC(2026, 10, 5, 3, 0, 0));
+    seat(world, clock, 'a', 'A', '익명');
+    clock.advance(30_000);
+    const j = world.join('c', prof('C', '새사람'));
+    expect(j.ok && j.today.top5).toEqual([{ nickname: '익명', sec: 30 }]);
   });
 
   test('today stats count only today part of a live session that started yesterday (KST)', () => {

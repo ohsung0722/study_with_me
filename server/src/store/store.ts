@@ -11,6 +11,7 @@ export interface RecordStore {
   userDaySec(anonId: string, dayKey: string): number;
   seatDaySec(seatId: string, dayKey: string, buildingId: string): number;
   setHidden(anonId: string, hidden: boolean): void;
+  isHidden(anonId: string): boolean;
   rename(anonId: string, nickname: string): void;
   deleteSessions(anonId: string, dayKey?: string): number;
   close(): void;
@@ -84,6 +85,10 @@ export function openStore(path: string): RecordStore {
       if (!r) return '';
       if (num(r.hidden) === 1) return '익명';
       return String(r.admin_name ?? r.nickname);
+    },
+    isHidden(anonId) {
+      const r = getProfile.get(anonId);
+      return r ? num(r.hidden) === 1 : false;
     },
     addSession(s) {
       for (const part of splitAtKstMidnight(s.startMs, s.endMs)) {

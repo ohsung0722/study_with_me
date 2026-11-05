@@ -150,6 +150,7 @@ export class World {
     if (!p || !seat) return { ok: false, reason: 'unknown' };
     for (const o of this.players.values()) if (o.seatId === seatId) return { ok: false, reason: 'taken' };
     if (p.seatId) return { ok: false, reason: 'taken' };
+    if (zoneAt(p.x, p.z) !== seat.zone) return { ok: false, reason: 'far' }; // no sitting through walls
     if (Math.hypot(p.x - seat.x, p.z - seat.z) > INTERACT_RANGE + 0.5) return { ok: false, reason: 'far' };
     p.x = seat.x; p.z = seat.z; p.ry = seat.facing;
     p.seatId = seat.id;

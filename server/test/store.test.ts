@@ -80,6 +80,17 @@ describe('RecordStore', () => {
     s.close();
   });
 
+  test('isHidden reflects setHidden live; unknown is false', () => {
+    const s = openStore(':memory:');
+    expect(s.isHidden('nobody')).toBe(false);
+    s.upsertProfile('a', '가나다');
+    expect(s.isHidden('a')).toBe(false);
+    s.setHidden('a', true);
+    expect(s.isHidden('a')).toBe(true);
+    s.setHidden('a', false);
+    expect(s.isHidden('a')).toBe(false);
+  });
+
   test('displayName of hidden profile is 익명; unknown is empty', () => {
     const s = openStore(':memory:');
     s.upsertProfile('a', 'alice');

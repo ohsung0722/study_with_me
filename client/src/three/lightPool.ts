@@ -8,8 +8,8 @@ export const LIGHT_POOL_SIZE = 6;
 export const POOL_PICK_MS = 150;  // how often the lamps are re-picked
 export const POOL_FADE_MS = 250;  // a slot's intensity settles over about this long
 const FADE_TAU_MS = POOL_FADE_MS / 3; // exponential easing: ~95 % after POOL_FADE_MS
-const DARK = 0.02;
-export const HELD_BONUS = 1.2;    // score bonus for a lamp that already has a slot (hysteresis: no swapping on jitter)                // below this a fading slot counts as off (and may jump to its next lamp)
+const DARK = 0.02;                // below this a fading slot counts as off (and may jump to its next lamp)
+export const HELD_BONUS = 1.2;    // score bonus for a lamp that already has a slot (hysteresis: no swapping on jitter)
 
 /** A lamp that can borrow a pool light. `intensity` is its current light intensity (theme × zone dim); 0 = off. */
 export interface LampSource {

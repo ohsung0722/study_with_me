@@ -15,13 +15,13 @@ export const UP_AFTER_MS = 3000;
 export const LOW_AFTER_MS = 3000;
 export const MAX_UP_AFTER_MS = 48_000;
 export const MAX_SAMPLE_MS = 250; // longer frames are stalls (hidden tab, GC, a shader compile), not load
-const FAILED_UP_MS = 2 * WINDOW_MS + 500;
+const FAILED_UP_MS = 2 * WINDOW_MS + 500; // a step down this soon after a step up means the step up failed
 // Display-relative thresholds: a vsync-bound cadence (30 Hz battery saver, 40–48 Hz panels) is not overload.
 export const FAST_REFRESH_K = 1.1;
 export const SLOW_REFRESH_K = 1.25;
 // Refresh intervals above this (< ~30 Hz) are not trusted as a display rate: a GPU-bound 60 Hz display that only
 // manages every 3rd vsync looks the same from rAF timing alone, and must still step down.
-export const MAX_REFRESH_MS = 34; // a step down this soon after a step up means the step up failed
+export const MAX_REFRESH_MS = 34;
 
 export type Tier = 'high' | 'low';
 export type QualityChange = 'none' | 'ratio' | 'tier';

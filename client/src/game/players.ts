@@ -2,7 +2,7 @@
 // Remote pose: sit on a seat, walk while the rendered position moves, else stand. An NPC that leaves stands up,
 // walks toward the reading-room door for 2 s while fading out, then disappears.
 import * as THREE from 'three';
-import { TICK_HZ, WALK_SPEED, seatById, type Appearance, type PlayerView, type Seat } from '@studyverse/shared';
+import { MAP, TICK_HZ, WALK_SPEED, seatById, type Appearance, type PlayerView, type Seat } from '@studyverse/shared';
 import { createAvatar, type AvatarRig, type Pose } from '../three/avatar';
 import { LabelSprite, labelText } from '../three/label';
 import { Interpolator } from './remotes';
@@ -21,13 +21,16 @@ export function remotePose(seated: boolean, movedM: number, dtMs: number, holdMs
   return { pose: seated ? 'sit' : hold > 0 ? 'walk' : 'stand', holdMs: hold };
 }
 
-const DOOR: Pt = { x: 16, z: 11 }; // reading room ↔ corridor door (x=16, z 10–12)
-const AISLE_X = 17.0;              // free strip between the corridor wall and the first desk column
+const DOOR_Z = 11;  // reading room ↔ corridor doors (z 10–12) in the main corridor walls
+const AISLE_IN = 1; // the free strip between the corridor wall and the first desk column, this far inside
 
 /** From a reading-room seat: step back from the desk, along the aisle behind the row, up the free strip, to the door. */
 export function npcExitPath(seat: Seat): Pt[] {
+  const r = MAP.zones[seat.zone], c = MAP.zones.corridor;
+  const doorX = r.x2 <= c.x1 ? r.x2 : r.x1;               // the room's wall on the main corridor
+  const aisleX = doorX + (doorX === r.x2 ? -AISLE_IN : AISLE_IN);
   const back = { x: seat.x - Math.sin(seat.facing) * 0.45, z: seat.z - Math.cos(seat.facing) * 0.45 };
-  return [{ x: seat.x, z: seat.z }, back, { x: AISLE_X, z: back.z }, { x: AISLE_X, z: DOOR.z }, { ...DOOR }];
+  return [{ x: seat.x, z: seat.z }, back, { x: aisleX, z: back.z }, { x: aisleX, z: DOOR_Z }, { x: doorX, z: DOOR_Z }];
 }
 
 /**

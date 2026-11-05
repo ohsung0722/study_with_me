@@ -68,11 +68,11 @@ describe('greetings', () => {
 describe('drinks', () => {
   test('drink near coffee machine ok; latte at vending fails; far away fails; expires after 10min', () => {
     const { world, clock, out, add } = setup();
-    add('a', '가나다', 2.2, 3);
+    add('a', '가나다', 27.2, 26.9);
     expect(world.takeDrink('a', 'latte')).toBe(true);
     expect(world.view('a')!.drink).toEqual({ id: 'latte', until: clock.now() + DRINK_LIFETIME_MS });
     expect(out.find('toAll', 'playerUpdated').pop()!.args[0]).toMatchObject({ id: 'a', drink: { id: 'latte' } });
-    expect(world.takeDrink('a', 'greenTea')).toBe(false); // vending is 3m away
+    expect(world.takeDrink('a', 'greenTea')).toBe(false); // vending is 8m away
     expect(world.takeDrink('a', 'nope' as any)).toBe(false);
     add('b', '라마바', 8, 8);
     expect(world.takeDrink('b', 'americano')).toBe(false);
@@ -92,15 +92,15 @@ describe('drinks', () => {
 describe('fix wave: drink range and greetAccept focus guard', () => {
   test('takeDrink allows the same +0.5m slack as sit (client prompt range + latency)', () => {
     const { world, add } = setup();
-    add('a', '가나다', 2.9, 3); // 1.9m from the coffee machine at (1, 3)
+    add('a', '가나다', 27.9, 26.9); // 1.9m from the coffee machine at (26, 26.9)
     expect(world.takeDrink('a', 'americano')).toBe(true);
-    add('b', '라마바', 3.1, 3); // 2.1m
+    add('b', '라마바', 28.1, 26.9); // 2.1m
     expect(world.takeDrink('b', 'americano')).toBe(false);
   });
 
   test('greetAccept does nothing while the accepter studies with focus', () => {
     const { world, out, add } = setup();
-    add('b', '라마바', 18.8, 3.4); add('a', '가나다', 19.8, 3.4); // b right behind R01's chair
+    add('b', '라마바', 17.2, 3.4); add('a', '가나다', 18.2, 3.4); // b right behind R01's chair
     expect(world.greet('a')).toEqual({ ok: true, targetId: 'b' });
     expect(world.sit('b', 'R01')).toEqual({ ok: true }); // desk → focus
     world.greetAccept('b', 'a');

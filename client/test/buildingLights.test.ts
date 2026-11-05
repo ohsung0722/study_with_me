@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import * as THREE from 'three';
-import { MAP, OTHER_ZONE_BRIGHTNESS, type ZoneId } from '@studyverse/shared';
+import { MAP, OTHER_ZONE_BRIGHTNESS, zoneAt, type ZoneId } from '@studyverse/shared';
 import { buildBuilding, type Building, type RoomLevels } from '../src/three/building';
 import { DAY, NIGHT } from '../src/three/theme';
 import { ZoneDimmer } from '../src/three/zoneDim';
@@ -26,6 +26,7 @@ function settle(b: Building, dim: ZoneDimmer, focus: { x: number; z: number }, m
 }
 /** Study-room light levels: the listed rooms fully on, the rest off. */
 const lit = (...on: ZoneId[]): RoomLevels => ({ level: (z) => (on.includes(z) ? 1 : 0) });
+const inLounge = (l: THREE.PointLight) => zoneAt(l.position.x, l.position.z) === 'lounge';
 const inRect = (l: THREE.PointLight, r: { x1: number; z1: number; x2: number; z2: number }) =>
   l.position.x > r.x1 && l.position.x < r.x2 && l.position.z > r.z1 && l.position.z < r.z2;
 /** Emitted red (shades scale emissiveIntensity, the lamp fill writes the emissive colour). */
@@ -46,13 +47,13 @@ describe('building lamps (light pool + glow)', () => {
       return ls;
     };
     b.applyTheme(DAY);
-    settle(b, dim, { x: 24, z: 6 }); // in the reading room
+    settle(b, dim, { x: 6, z: 6 }); // in the reading room
     expect(check().filter((l) => l.intensity > 0)).toHaveLength(6); // 24 desk lamps by day → the pool is full
     b.applyTheme(NIGHT);
-    settle(b, dim, { x: 6, z: 12 }); // lounge
+    settle(b, dim, { x: 6, z: 30 }); // lounge
     check();
     dim.setZone('lounge');
-    settle(b, dim, { x: 6, z: 12 });
+    settle(b, dim, { x: 6, z: 30 });
     check();
   });
 
@@ -61,19 +62,36 @@ describe('building lamps (light pool + glow)', () => {
     const dim = new ZoneDimmer();
     const b = buildBuilding(scene, dim);
     b.applyTheme(NIGHT);
-    settle(b, dim, { x: 6, z: 12 });
-    const lounge = pointLights(scene).filter((l) => l.intensity > 0 && l.position.x < 13);
-    expect(lounge.length).toBe(5);
+    settle(b, dim, { x: 6, z: 30 });
+    const lounge = pointLights(scene).filter((l) => l.intensity > 0 && inLounge(l));
+    expect(lounge.length).toBe(4); // all of the sofa lounge's lamps
     b.applyTheme(DAY);
-    settle(b, dim, { x: 6, z: 12 });
-    expect(pointLights(scene).filter((l) => l.intensity > 0 && l.position.x < 13)).toHaveLength(0);
+    settle(b, dim, { x: 6, z: 30 });
+    expect(pointLights(scene).filter((l) => l.intensity > 0 && inLounge(l))).toHaveLength(0);
+  });
+
+  test('NIGHT lounge: someone inside turns the lamps up and brings back part of the daytime colours', () => {
+    const scene = new THREE.Scene();
+    const dim = new ZoneDimmer();
+    const b = buildBuilding(scene, dim);
+    const wall = () => ((scene.getObjectByName('lounge:wall') as THREE.Mesh).material as THREE.MeshLambertMaterial).color.r;
+    const lampSum = () => pointLights(scene).filter(inLounge).reduce((s, l) => s + l.intensity, 0);
+    b.applyTheme(NIGHT);
+    settle(b, dim, { x: 6, z: 30 }, 2000, lit());
+    const emptyWall = wall(), emptyLamps = lampSum();
+    expect(emptyLamps).toBeGreaterThan(0); // the lounge lamps are on every night, empty or not
+    settle(b, dim, { x: 6, z: 30 }, 2000, lit('lounge'));
+    expect(wall()).toBeGreaterThan(emptyWall * 1.5);
+    expect(lampSum()).toBeGreaterThan(emptyLamps * 1.5);
+    settle(b, dim, { x: 6, z: 30 }, 5000, lit()); // empties: back down after the fade
+    expect(wall()).toBeCloseTo(emptyWall, 6);
   });
 
   test('corridor sconces: glow + wall fill by day, brighter at night, never a real light', () => {
     const scene = new THREE.Scene();
     const dim = new ZoneDimmer();
     const b = buildBuilding(scene, dim);
-    const focus = { x: 14.5, z: 12 }; // standing in the corridor
+    const focus = { x: 21.5, z: 12 }; // standing in the corridor
     const wallFill = () => (scene.getObjectByName('corridor:wall') as THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>)
       .material.emissive.r;
     b.applyTheme(DAY);
@@ -82,13 +100,13 @@ describe('building lamps (light pool + glow)', () => {
     expect(day).toBeGreaterThan(0);
     expect(wallFill()).toBeGreaterThan(0);
     const dayLights = pointLights(scene).filter((l) => l.intensity > 0);
-    expect(dayLights.every((l) => l.position.x < 13 || l.position.x > 16)).toBe(true); // pool stays on room lamps
+    expect(dayLights.every((l) => l.position.x < 20 || l.position.x > 23)).toBe(true); // pool stays on room lamps
     b.applyTheme(NIGHT);
     settle(b, dim, focus);
     const night = colourSum(scene, 'glow:corridor');
     expect(night).toBeGreaterThan(day);
     expect(pointLights(scene).length).toBeLessThanOrEqual(6);
-    expect(pointLights(scene).filter((l) => l.intensity > 0).every((l) => l.position.x < 13 || l.position.x > 16)).toBe(true);
+    expect(pointLights(scene).filter((l) => l.intensity > 0).every((l) => l.position.x < 20 || l.position.x > 23)).toBe(true);
     dim.setZone('lounge'); // the corridor dims with the other zones
     settle(b, dim, focus);
     expect(colourSum(scene, 'glow:corridor')).toBeLessThan(night * OTHER_ZONE_BRIGHTNESS + 1e-6);
@@ -99,7 +117,7 @@ describe('building lamps (light pool + glow)', () => {
     const dim = new ZoneDimmer();
     const b = buildBuilding(scene, dim);
     b.applyTheme(NIGHT);
-    const focus = { x: 6, z: 12 }; // in the lounge: the reading-room desk lamps all draw as glow
+    const focus = { x: 6, z: 30 }; // in the lounge: the reading-room desk lamps all draw as glow
     settle(b, dim, focus);
     const full = colourSum(scene, 'glow:reading');
     expect(full).toBeGreaterThan(0);
@@ -120,7 +138,7 @@ describe('building lamps (light pool + glow)', () => {
     const dim = new ZoneDimmer();
     const b = buildBuilding(scene, dim);
     const A = MAP.zones.studyA, B = MAP.zones.studyB;
-    const inA = { x: 21, z: 16.5 };
+    const inA = { x: 2, z: 16.5 };
     for (const theme of [NIGHT, DAY]) {
       b.applyTheme(theme);
       // nobody in either room: dark, even at night (no pool light, no glow, shades off)
@@ -141,12 +159,12 @@ describe('building lamps (light pool + glow)', () => {
     }
     // seen from afar (lamps not pooled), a lit room shows as glow + a warm fill on its walls
     b.applyTheme(NIGHT);
-    settle(b, dim, { x: 6, z: 12 }, 2000, lit('studyB'));
+    settle(b, dim, { x: 6, z: 30 }, 2000, lit('studyB'));
     expect(colourSum(scene, 'glow:studyB')).toBeGreaterThan(0);
     expect(emissive(scene, 'studyB:wall')).toBeGreaterThan(0);
     expect(emissive(scene, 'studyA:wall')).toBe(0);
     // no levels given (e.g. older callers): rooms stay dark
-    settle(b, dim, { x: 6, z: 12 });
+    settle(b, dim, { x: 6, z: 30 });
     expect(colourSum(scene, 'glow:studyB')).toBe(0);
   });
 
@@ -156,17 +174,17 @@ describe('building lamps (light pool + glow)', () => {
     const b = buildBuilding(scene, dim);
     const wall = (z: string) => ((scene.getObjectByName(`${z}:wall`) as THREE.Mesh).material as THREE.MeshLambertMaterial).color.r;
     b.applyTheme(NIGHT);
-    settle(b, dim, { x: 6, z: 12 }, 1000, lit());
+    settle(b, dim, { x: 6, z: 30 }, 1000, lit());
     const dark = wall('studyA');
     expect(wall('studyB')).toBeCloseTo(dark, 6);
-    settle(b, dim, { x: 6, z: 12 }, 1000, lit('studyA'));
+    settle(b, dim, { x: 6, z: 30 }, 1000, lit('studyA'));
     expect(wall('studyA')).toBeGreaterThan(dark * 1.5);
     expect(wall('studyB')).toBeCloseTo(dark, 6);
     b.applyTheme(DAY); // by day the colours don't depend on the lights
     const day = wall('studyB');
     expect(wall('studyA')).toBeCloseTo(day, 6);
     b.applyTheme(NIGHT);
-    settle(b, dim, { x: 6, z: 12 }, 5000, lit()); // empties: back to dark after the fade
+    settle(b, dim, { x: 6, z: 30 }, 5000, lit()); // empties: back to dark after the fade
     expect(wall('studyA')).toBeCloseTo(dark, 6);
   });
 
@@ -174,50 +192,50 @@ describe('building lamps (light pool + glow)', () => {
     const scene = new THREE.Scene();
     const dim = new ZoneDimmer();
     const b = buildBuilding(scene, dim);
-    for (const z of ['lounge', 'studyA', 'studyB']) {
+    for (const z of ['lounge', 'cafe', 'studyA', 'studyD']) {
       expect(scene.getObjectByName(`window:${z}`), z).toBeDefined();
       expect(scene.getObjectByName(`rain:${z}`), z).toBeDefined();
     }
-    for (const z of ['studyA', 'studyB']) {
+    for (const z of ['studyA', 'studyB', 'studyC', 'studyD']) {
       expect(scene.getObjectByName(`monitor:${z}`), z).toBeDefined();
       expect(scene.getObjectByName(`${z}:decor`), z).toBeDefined(); // whiteboard, sticky notes, clock, rug…
     }
     const screen = (z: string) => ((scene.getObjectByName(`monitor:${z}`) as THREE.Mesh).material as THREE.MeshBasicMaterial).color.r;
     b.applyTheme(DAY);
-    settle(b, dim, { x: 21, z: 16.5 }, 1000, lit('studyA'));
+    settle(b, dim, { x: 2, z: 16.5 }, 1000, lit('studyA'));
     expect(screen('studyA')).toBeGreaterThan(0.8);
     expect(screen('studyB')).toBeLessThan(0.2);
     b.applyTheme(NIGHT);
-    expect((scene.getObjectByName('rain:studyB') as THREE.Mesh).visible).toBe(true);
+    expect((scene.getObjectByName('rain:studyD') as THREE.Mesh).visible).toBe(true);
     b.applyTheme(DAY);
-    expect((scene.getObjectByName('rain:studyB') as THREE.Mesh).visible).toBe(false);
+    expect((scene.getObjectByName('rain:studyD') as THREE.Mesh).visible).toBe(false);
     // windows dim with their room
     const sky = (z: string) => ((scene.getObjectByName(`window:${z}`) as THREE.Mesh).material as THREE.MeshBasicMaterial).color.r;
-    const full = sky('studyB');
+    const full = sky('studyD');
     dim.setZone('studyA');
-    settle(b, dim, { x: 21, z: 16.5 }, 1000, lit('studyA'));
-    expect(sky('studyB')).toBeCloseTo(full * OTHER_ZONE_BRIGHTNESS, 5);
+    settle(b, dim, { x: 2, z: 16.5 }, 1000, lit('studyA'));
+    expect(sky('studyD')).toBeCloseTo(full * OTHER_ZONE_BRIGHTNESS, 5);
   });
 
-  test('lounge window (regression): 160 rain drops, the moon where it was, dims with the lounge', () => {
+  test('lounge window (regression): 100 rain drops, the moon at the window\'s far end, dims with the lounge', () => {
     const scene = new THREE.Scene();
     const dim = new ZoneDimmer();
     const b = buildBuilding(scene, dim);
-    expect((scene.getObjectByName('rain:lounge') as THREE.InstancedMesh).count).toBe(160);
+    expect((scene.getObjectByName('rain:lounge') as THREE.InstancedMesh).count).toBe(100); // 10 m × 10 per m
     const moon = scene.getObjectByName('moon:lounge')!;
     expect(moon.position.x).toBeCloseTo(0.106, 6); // inner face of the x=0 wall (0.1) + 0.006
     expect(moon.position.y).toBeCloseTo(2.2, 6);   // window top 2.6 − 0.4
-    expect(moon.position.z).toBeCloseTo(16.8, 6);  // window end 20 − 3.2
+    expect(moon.position.z).toBeCloseTo(33, 6);    // window end 36 − min(3.2, 0.3 × 10 m)
     const sky = scene.getObjectByName('window:lounge') as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
     sky.geometry.computeBoundingBox();
     const bb = sky.geometry.boundingBox!;
     expect(bb.min.x).toBeCloseTo(0.104, 6);
-    expect([bb.min.y, bb.max.y, bb.min.z, bb.max.z]).toEqual([0.9, 2.6, 4, 20].map((v) => expect.closeTo(v, 6)));
+    expect([bb.min.y, bb.max.y, bb.min.z, bb.max.z]).toEqual([0.9, 2.6, 26, 36].map((v) => expect.closeTo(v, 6)));
     b.applyTheme(NIGHT);
     const full = sky.material.color.r;
     expect(full).toBeGreaterThan(0);
     dim.setZone('reading');
-    settle(b, dim, { x: 20, z: 6 }, 1000);
+    settle(b, dim, { x: 6, z: 6 }, 1000);
     expect(sky.material.color.r).toBeCloseTo(full * OTHER_ZONE_BRIGHTNESS, 6);
   });
 });

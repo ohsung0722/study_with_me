@@ -1,9 +1,9 @@
 // The running game: wires the 3D scene, my movement/camera, other players, HUD/lounge and the socket together.
-// Frame order: input → movement → MoveSender → ZoneDimmer.setZone/update → theme → study-room occupancy (RoomLights)
+// Frame order: input → movement → MoveSender → ZoneDimmer.setZone/update → theme → room occupancy (RoomLights)
 // → Building.update → avatars/labels → camera/vignette → pickPrompt (+E) → HUD. Rendering follows in the scene loop.
 import * as THREE from 'three';
 import {
-  GREET_TOAST_MS, THEME_FADE_MS, kstDayKey, seatById, zoneAt,
+  GREET_TOAST_MS, THEME_FADE_MS, kstDayKey, seatById, zoneAt, zoneKind,
   type JoinOk, type PlayerView, type Profile, type ServerToClient, type TodayStats, type ZoneId,
 } from '@studyverse/shared';
 import type { GameConnection } from '../net';
@@ -296,7 +296,7 @@ export class Game {
     this.dimmer.setZone(myZone);
     this.dimmer.update(dtMs);
     if (this.blender.update(dtMs)) this.applyTheme();
-    // study-room occupancy from everyone's position (others: where they were drawn last frame)
+    // lounge + study-room occupancy from everyone's position (others: where they were drawn last frame)
     this.rooms.mark(this.me.x, this.me.z);
     this.remotes.forEachPosition(this.markRoom);
     this.rooms.update(dtMs);
@@ -310,9 +310,8 @@ export class Game {
     this.myAvatar.paint(this.myView, serverNow, true, dimAt(this.me.x, this.me.z));
     this.myAvatar.setLabelVisible(!seat); // the seated camera sits right behind it; the HUD shows 🔒 and my time
 
-    // camera + focus vignette centred on me (steeper in the shallow study rooms so the walls don't pull it in)
+    // camera + focus vignette centred on me
     this.cam.setSeatedView(seat);
-    this.cam.updatePitchFloor(myZone, dtMs);
     this.cam.follow(this.tmp.set(this.me.x, 0, this.me.z), dtMs, this.occluders);
     const focus = isFocus(this.myView);
     this.hud.setFocus(focus);
@@ -419,9 +418,9 @@ export class Game {
     });
   }
 
-  /** Break-minutes chips while I'm in the lounge; a pick goes to the server and into the saved profile. */
+  /** Break-minutes chips while I'm in a lounge; a pick goes to the server and into the saved profile. */
   private syncBreakPicker(zone: ZoneId | null): void {
-    const want = zone === 'lounge';
+    const want = zoneKind(zone) === 'lounge';
     if (want === this.pickerShown) return;
     this.pickerShown = want;
     if (!want) return this.lounge.hideBreakPicker();

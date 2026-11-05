@@ -64,8 +64,8 @@ const distToRect = (r: Rect, x: number, z: number) =>
   Math.hypot(x - Math.min(Math.max(x, r.x1), r.x2), z - Math.min(Math.max(z, r.z1), r.z2));
 
 describe('seatedCameraPose', () => {
-  test('covers all 44 seats', () => {
-    expect(MAP.seats).toHaveLength(44);
+  test('covers all 80 seats', () => {
+    expect(MAP.seats).toHaveLength(80);
   });
 
   test.each(MAP.seats.map((s) => [s.id, s] as const))('%s: camera stays in its own zone, clear of walls, with no wall in between', (_id, seat) => {

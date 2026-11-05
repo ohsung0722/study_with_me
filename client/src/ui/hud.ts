@@ -4,7 +4,8 @@ import { formatHMS, formatMS, type ZoneId } from '@studyverse/shared';
 import type { Prompt } from '../game/interact';
 
 export const ZONE_NAMES: Record<ZoneId, string> = {
-  lounge: '라운지', corridor: '복도', reading: '열람실', studyA: '스터디룸 A', studyB: '스터디룸 B',
+  lounge: '라운지', cafe: '카페', corridor: '복도', hallW: '복도', hallE: '복도', reading: '열람실 A', readingB: '열람실 B',
+  studyA: '스터디룸 A', studyB: '스터디룸 B', studyC: '스터디룸 C', studyD: '스터디룸 D',
 };
 
 const MAX_TOASTS = 3;

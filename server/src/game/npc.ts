@@ -1,6 +1,6 @@
 import { NPC_REAL_THRESHOLD, seatById, type Appearance, type PlayerView } from '@studyverse/shared';
 
-// Back row of the reading room (z≈2.85), the row farthest from its door (x=16, z10–12) and the entrance; spread out.
+// Back row of the west reading room (z≈2.85), the row farthest from its door (x=20, z10–12) and the entrance; spread out.
 export const NPC_SEATS = ['R06', 'R04', 'R02'] as const;
 
 const NPC_APPEARANCES: readonly Appearance[] = [
@@ -21,7 +21,7 @@ export function makeNpc(index: number, now: number, rand: () => number, seatId: 
   const minutes = 20 + rand() * 70;
   return {
     id: `npc-${index + 1}`, nickname: '메이트', appearance: NPC_APPEARANCES[index % NPC_APPEARANCES.length], isNpc: true,
-    x: seat.x, z: seat.z, ry: seat.facing, zone: 'reading', seatId: seat.id,
+    x: seat.x, z: seat.z, ry: seat.facing, zone: seat.zone, seatId: seat.id,
     status: { kind: 'studying', startedAt: now - Math.floor(minutes * 60000), focus: true },
     drink: null,
   };

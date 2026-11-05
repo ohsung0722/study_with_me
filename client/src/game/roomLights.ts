@@ -1,12 +1,14 @@
-// Study-room lights that switch on while someone is inside. Occupancy is derived on each client from the player
+// Room lights that respond to people: the study rooms' pendants switch on, and the lounge lamps (on every night)
+// turn up while someone is inside. Occupancy is derived on each client from the player
 // positions it already has (me, other players, NPCs): every frame the caller marks each position, then update()
 // advances each room's light level. A room is on while anyone is in it; once it empties the light holds for
 // ROOM_LIGHT_OFF_DELAY_MS, then fades off. Fading on/off takes ROOM_LIGHT_FADE_MS (linear level; the renderer may
 // ease it). Everyone sees the same lit rooms, which doubles as a "room in use" signal from the corridor.
-import { zoneAt, type ZoneId } from '@studyverse/shared';
+import { MAP, ZONE_KIND, zoneAt, type ZoneId } from '@studyverse/shared';
 
-export const LIT_ROOMS = ['studyA', 'studyB'] as const satisfies readonly ZoneId[];
-export type LitRoom = (typeof LIT_ROOMS)[number];
+/** The lounges and the study rooms. */
+export const LIT_ROOMS: readonly ZoneId[] = (Object.keys(MAP.zones) as ZoneId[])
+  .filter(z => ZONE_KIND[z] === 'lounge' || ZONE_KIND[z] === 'study');
 export const ROOM_LIGHT_OFF_DELAY_MS = 3000;
 export const ROOM_LIGHT_FADE_MS = 400;
 
@@ -32,7 +34,7 @@ export function stepRoomLight(s: RoomLightState, occupied: boolean, dtMs: number
   return s;
 }
 
-/** Per-room light levels for the study rooms. mark() every player position, then update() once per frame. */
+/** Per-room light levels for the lounge and the study rooms. mark() every player position, then update() once per frame. */
 export class RoomLights {
   private readonly states: RoomLightState[] = LIT_ROOMS.map(() => ({ level: 0, emptyMs: 0 }));
   private readonly occupied: boolean[] = LIT_ROOMS.map(() => false);
@@ -41,7 +43,7 @@ export class RoomLights {
   mark(x: number, z: number): void {
     const zone = zoneAt(x, z);
     if (zone === null) return;
-    const i = (LIT_ROOMS as readonly ZoneId[]).indexOf(zone);
+    const i = LIT_ROOMS.indexOf(zone);
     if (i >= 0) this.occupied[i] = true;
   }
 
@@ -55,7 +57,7 @@ export class RoomLights {
 
   /** Current light level (0..1) of a zone; 0 for zones without occupancy lights. */
   level(zone: ZoneId): number {
-    const i = (LIT_ROOMS as readonly ZoneId[]).indexOf(zone);
+    const i = LIT_ROOMS.indexOf(zone);
     return i >= 0 ? this.states[i].level : 0;
   }
 }

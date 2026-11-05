@@ -29,13 +29,14 @@ describe('npcExitPath / pointAlong', () => {
     expect(path[0]).toEqual({ x: seat.x, z: seat.z });
     expect(path[1].z).toBeGreaterThan(seat.z); // desk is at -z (seat faces PI): back away to +z
     const end = path[path.length - 1];
-    expect(end.x).toBeCloseTo(16, 5);
-    expect(end.z).toBeGreaterThanOrEqual(10); // reading door: x=16, z 10–12
+    expect(end.x).toBeCloseTo(20, 5);
+    expect(end.z).toBeGreaterThanOrEqual(10); // west reading door: x=20, z 10–12
     expect(end.z).toBeLessThanOrEqual(12);
   });
   test('the path never passes through desks or walls (sampled every 5 cm) for every NPC seat', () => {
-    // NPC seats (server NPC_SEATS: R06, R04, R02), fallback desks (highest free ids) and the corner desk by the door aisle
-    for (const id of ['R06', 'R04', 'R02', 'R24', 'R23', 'R19', 'R01']) {
+    // NPC seats (server NPC_SEATS: R06, R04, R02), fallback desks (highest free ids, in the east room) and the corner
+    // desks by the door aisles
+    for (const id of ['R06', 'R04', 'R02', 'R48', 'R47', 'R43', 'R25', 'R24', 'R19', 'R01']) {
       const path = npcExitPath(seatById(id)!);
       let len = 0;
       for (let i = 1; i < path.length; i++) len += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);

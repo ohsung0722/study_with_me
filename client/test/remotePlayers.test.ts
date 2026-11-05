@@ -35,7 +35,7 @@ describe('RemotePlayers.forEachPosition', () => {
     r.update(16, 0, () => 1);
     const seen: [number, number][] = [];
     r.forEachPosition((x, z) => seen.push([x, z]));
-    expect(seen).toEqual([[20, 16], [26, 20.45]]); // B2: x 26, z 21.5 − 1.05
+    expect(seen).toEqual([[20, 16], [15, 16.45]]); // B2: x 15, z 17.5 − 1.05
     r.clear();
   });
 });

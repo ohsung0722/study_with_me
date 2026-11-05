@@ -30,8 +30,8 @@ describe('pickGreetTarget', () => {
     expect(pickGreetTarget(sender(), [view('n', 5.5, 5, { isNpc: true })], 1000)).toEqual({ ok: false, reason: 'noTarget' });
   });
   test('target in another zone (through a wall) is not eligible; self is ignored', () => {
-    // lounge x<13, corridor beyond; 12.5 vs 13.5 are 1m apart
-    const s = sender({ x: 12.5, z: 5 });
-    expect(pickGreetTarget(s, [view('c', 13.5, 5, { zone: 'corridor' }), view('s', 12.5, 5)], 1000)).toEqual({ ok: false, reason: 'noTarget' });
+    // reading room x<20, corridor beyond; 19.5 vs 20.5 are 1m apart
+    const s = sender({ x: 19.5, z: 5 });
+    expect(pickGreetTarget(s, [view('c', 20.5, 5, { zone: 'corridor' }), view('s', 19.5, 5)], 1000)).toEqual({ ok: false, reason: 'noTarget' });
   });
 });

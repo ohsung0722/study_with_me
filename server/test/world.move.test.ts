@@ -16,8 +16,8 @@ function setup(start = 1_000_000) {
   const world = new World({ now: clock.now, store, out });
   return { clock, store, out, world };
 }
-const LOUNGE = { x: 11, z: 20 }; // open floor in the lounge
-const CORRIDOR = { x: 14.5, z: 20 }; // spawn is in the corridor (x 13..16)
+const LOUNGE = { x: 14, z: 30 }; // open floor in the lounge
+const CORRIDOR = { x: 21.5, z: 20 }; // spawn is in the corridor (x 20..23)
 
 describe('World movement', () => {
   test('valid move updates position and next tick snapshot contains only movers', () => {
@@ -47,7 +47,7 @@ describe('World movement', () => {
     world.join('a', prof('A', '가나다'));
     clock.advance(1000); // allows 4*1*1.5+0.5 = 6.5 m
     world.move('a', 2, 2, 0); // far teleport
-    world.move('a', MAP.spawn.x, 24.2, 0); // outside the building
+    world.move('a', MAP.spawn.x, 37.2, 0); // outside the building
     world.move('a', 0.05, 23, 0); // inside the west wall
     world.move('a', Number.NaN, 20, 0);
     const corr = out.find('toPlayer', 'correct');
@@ -65,33 +65,33 @@ describe('World movement', () => {
     const { world, out, clock } = setup();
     world.join('a', prof('A', '가나다'));
     clock.advance(100);
-    world.move('a', 14.5, 18, 0); // 5m in 0.1s: rejected
+    world.move('a', 22.5, 27, 0); // 9m in 0.1s: rejected
     expect(out.find('toPlayer', 'correct')).toHaveLength(1);
     clock.advance(2000);
-    world.move('a', 14.5, 18, 0); // 2.1s since join: allowed (limit 13.1m)
-    expect(world.view('a')).toMatchObject({ x: 14.5, z: 18 });
+    world.move('a', 22.5, 27, 0); // 2.1s since join: allowed (limit 13.1m)
+    expect(world.view('a')).toMatchObject({ x: 22.5, z: 27 });
     expect(out.find('toPlayer', 'correct')).toHaveLength(1);
   });
 
   test('sit through a wall is rejected (player zone must equal seat zone)', () => {
     const { world, clock } = setup();
     world.join('a', prof('A', '가나다'));
-    moveAfter(world, clock, 'a', 24.5, 13.5, 0); // reading side of the z=14 wall
-    expect(world.view('a')!.zone).toBe('reading');
-    const a1 = seatById('A1')!; // study room A, just behind the wall
-    expect(Math.hypot(a1.x - 24.5, a1.z - 13.5)).toBeLessThanOrEqual(INTERACT_RANGE + 0.5); // close enough by distance
-    expect(world.sit('a', 'A1')).toEqual({ ok: false, reason: 'far' });
+    moveAfter(world, clock, 'a', 28.5, 13.5, 0); // reading side of the z=14 wall
+    expect(world.view('a')!.zone).toBe('readingB');
+    const c1 = seatById('C1')!; // study room C, just behind the wall
+    expect(Math.hypot(c1.x - 28.5, c1.z - 13.5)).toBeLessThanOrEqual(INTERACT_RANGE + 1.5); // only the wall in between
+    expect(world.sit('a', 'C1')).toEqual({ ok: false, reason: 'far' });
     expect(world.view('a')!.seatId).toBeNull();
   });
 
   test('move while seated is ignored', () => {
     const { world, out, clock } = setup();
     world.join('a', prof('A', '가나다'));
-    moveAfter(world, clock, 'a', 18.8, 3.4, 0);
+    moveAfter(world, clock, 'a', 17.2, 3.4, 0);
     expect(world.sit('a', 'R01')).toEqual({ ok: true });
     const before = world.view('a')!;
     out.calls.length = 0;
-    moveAfter(world, clock, 'a', 20, 8, 0);
+    moveAfter(world, clock, 'a', 6, 8, 0);
     expect(world.view('a')).toEqual(before);
     expect(out.calls).toHaveLength(0);
   });
@@ -126,7 +126,7 @@ describe('World movement', () => {
   test('sitting on a lounge sofa and standing up keep the break', () => {
     const { world, clock } = setup();
     world.join('a', prof('A', '가나다'));
-    moveAfter(world, clock, 'a', 4.5, 10.5);
+    moveAfter(world, clock, 'a', 5.5, 29.5);
     const status = world.view('a')!.status;
     expect(status.kind).toBe('break');
     expect(world.sit('a', 'S1')).toEqual({ ok: true });
@@ -140,7 +140,7 @@ describe('World movement', () => {
     world.join('a', prof('A', '가나다'));
     expect(out.find('setRoom', 'setRoom').at(-1)).toMatchObject({ id: 'a', args: ['main:corridor'] });
     out.calls.length = 0;
-    moveAfter(world, clock, 'a', 14.5, 22); // same zone: nothing
+    moveAfter(world, clock, 'a', 21.5, 22); // same zone: nothing
     expect(out.find('setRoom', 'setRoom')).toHaveLength(0);
     expect(out.find('toAll', 'playerUpdated')).toHaveLength(0);
     moveAfter(world, clock, 'a', LOUNGE.x, LOUNGE.z);
@@ -164,7 +164,7 @@ describe('World movement', () => {
 describe('World today stats', () => {
   function seat(world: World, clock: ReturnType<typeof fakeClock>, id: string, anon: string, nick: string) {
     world.join(id, prof(anon, nick));
-    moveAfter(world, clock, id, 18.8, 3.4, 0);
+    moveAfter(world, clock, id, 17.2, 3.4, 0);
     expect(world.sit(id, 'R01')).toEqual({ ok: true });
   }
 
@@ -209,7 +209,7 @@ describe('World today stats', () => {
     store.addSession({ anonId: 'B', buildingId: 'main', seatId: 'R02', startMs: clock.now() - 100_000, endMs: clock.now() - 40_000 });
     seat(world, clock, 'a', 'A', '숨은이');
     world.join('b', prof('B', '보이는이'));
-    moveAfter(world, clock, 'b', 21.8, 3.4, 0);
+    moveAfter(world, clock, 'b', 14.2, 3.4, 0);
     expect(world.sit('b', 'R02')).toEqual({ ok: true });
     store.setHidden('A', true); // flipped mid-session, e.g. by the admin CLI
     clock.advance(30_000);

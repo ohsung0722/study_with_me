@@ -93,7 +93,7 @@ describe('npc mates', () => {
     moveAfter(world, clock, 'a', s.x, s.z + 1, 0);
     expect(world.sit('a', 'R06')).toEqual({ ok: true });
     world.tick();
-    expect(world.view('npc-1')!.seatId).toBe('R24'); // the highest free desk id
+    expect(world.view('npc-1')!.seatId).toBe('R48'); // the highest free desk id (east reading room)
     expect(world.view('npc-2')!.seatId).toBe('R04'); // its own seat is still free
   });
 });

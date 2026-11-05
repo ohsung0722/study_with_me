@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { MAP, seatById } from '@studyverse/shared';
 import { LIT_ROOMS, ROOM_LIGHT_FADE_MS, ROOM_LIGHT_OFF_DELAY_MS, RoomLights, stepRoomLight } from '../src/game/roomLights';
 
-const IN_A = { x: 20, z: 16.5 }, IN_B = { x: 30, z: 21.5 }, CORRIDOR = { x: 14.5, z: 16.5 }, READING = { x: 20, z: 6 };
+const IN_A = { x: 2, z: 16.5 }, IN_B = { x: 12, z: 16.5 }, CORRIDOR = { x: 21.5, z: 16.5 }, READING = { x: 6, z: 6 };
 
 /** Run `ms` of 16 ms frames, marking `who` every frame. */
 function run(r: RoomLights, who: { x: number; z: number }[], ms: number, step = 16) {
@@ -52,11 +52,14 @@ describe('stepRoomLight (one room)', () => {
 });
 
 describe('RoomLights (players → per-room level)', () => {
-  test('the lit rooms are the two study rooms; every other zone reads 0', () => {
-    expect([...LIT_ROOMS]).toEqual(['studyA', 'studyB']);
+  test('the lit rooms are the two lounges and the four study rooms; every other zone reads 0', () => {
+    expect([...LIT_ROOMS].sort()).toEqual(['cafe', 'lounge', 'studyA', 'studyB', 'studyC', 'studyD']);
     const r = new RoomLights();
-    run(r, [CORRIDOR, READING, { x: 6, z: 12 }], 2000);
+    run(r, [CORRIDOR, READING, { x: 5, z: 22.5 }], 2000); // the west hall too
     for (const z of Object.keys(MAP.zones) as (keyof typeof MAP.zones)[]) expect(r.level(z), z).toBe(0);
+    run(r, [{ x: 6, z: 30 }], 2000);
+    expect(r.level('lounge')).toBe(1);
+    expect(r.level('cafe')).toBe(0);
   });
   test('starts off; anyone inside (me, a player, an NPC seat) turns that room on within ~0.4 s', () => {
     const r = new RoomLights();

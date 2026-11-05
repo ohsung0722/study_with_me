@@ -25,10 +25,10 @@ test('startServer close() persists a seated client session', async () => {
     await new Promise<void>((r) => c.once('connect', () => r()));
     const j = await new Promise<JoinResult>((r) => c.emit('join', prof, r));
     expect(j.ok).toBe(true);
-    // spawn (14.5,23) in corridor -> studyB door (x=16, z 20.5-22.5) -> near seat B1 (24.5, 20.45)
+    // spawn (22.5,36) up the corridor -> east hall -> studyC door (z=21, x 26-28) -> near seat C1 (28.5, 16.45)
     const corrections: unknown[] = [];
     c.on('correct', (p) => corrections.push(p));
-    const waypoints: [number, number][] = [[14.5, 23], [14.5, 21.5], [23.5, 21.5], [24.3, 20.3]];
+    const waypoints: [number, number][] = [[22.5, 36], [22.5, 23], [27, 23], [27, 20], [27.3, 16.2]];
     // Steps <= 0.45 m: always within the server's speed budget (0.5 m + WALK_SPEED*dt*1.5), whatever the timer jitter.
     for (let i = 1; i < waypoints.length; i++) {
       const [x0, z0] = waypoints[i - 1], [x1, z1] = waypoints[i];
@@ -40,7 +40,7 @@ test('startServer close() persists a seated client session', async () => {
     }
     await sleep(150);
     expect(corrections, 'server rejected a move').toEqual([]);
-    const s = await new Promise<SitResult>((r) => c.emit('sit', { seatId: 'B1' }, r));
+    const s = await new Promise<SitResult>((r) => c.emit('sit', { seatId: 'C1' }, r));
     expect(s).toEqual({ ok: true });
     await sleep(1100);
   } finally {
@@ -52,4 +52,4 @@ test('startServer close() persists a seated client session', async () => {
   try {
     expect(store.userDaySec('persist-1', kstDayKey(Date.now()))).toBeGreaterThan(0);
   } finally { store.close(); }
-});
+}, 15_000); // ~24 m on foot in 0.45 m steps every 100 ms

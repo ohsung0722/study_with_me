@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import {
   BUILDING_CAPACITY, BUILDING_ID, DRINKS, DRINK_LIFETIME_MS, GREET_TOAST_MS, INTERACT_RANGE, MAP, PLAYER_RADIUS, TODAY_BROADCAST_MS, WALK_SPEED,
-  isBlocked, kstDayKey, seatById, splitAtKstMidnight, validateNickname, zoneAt,
+  isBlocked, kstDayKey, seatById, splitAtKstMidnight, validateNickname, zoneAt, zoneKind,
   type DrinkId, type GreetResult, type JoinResult, type PlayerView, type Profile, type SitResult, type TodayStats,
 } from '@studyverse/shared';
 import { computeToday } from './today';
@@ -104,9 +104,10 @@ export class World {
     if (zone !== p.zone) {
       p.zone = zone;
       out.setRoom(connId, zone ? `${BUILDING_ID}:${zone}` : null);
-      if (zone === 'lounge' && p.status.kind !== 'studying') {
+      const lounge = zoneKind(zone) === 'lounge'; // either lounge; walking from one to the other keeps the break
+      if (lounge && p.status.kind === 'none') {
         p.status = { kind: 'break', endsAt: t + p.breakMinutes * 60000 };
-      } else if (zone !== 'lounge' && p.status.kind === 'break') {
+      } else if (!lounge && p.status.kind === 'break') {
         p.status = { kind: 'none' };
       }
       out.toAll('playerUpdated', toView(p));

@@ -48,13 +48,13 @@ describe('stepMovement', () => {
 
 describe('walkBlocked', () => {
   test('step out through the entrance gap is blocked (outside building)', () => {
-    expect(walkBlocked(14.5, 23)).toBe(false);
-    expect(walkBlocked(14.5, 24.1)).toBe(true);
-    const r = stepMovement({ x: 14.5, z: 23.9 }, { x: 0, z: -1 }, 0, 0.1, walkBlocked); // S at yaw 0 -> +z
-    expect(r.z).toBeLessThan(24);
+    expect(walkBlocked(22.5, 36)).toBe(false);
+    expect(walkBlocked(22.5, 37.1)).toBe(true);
+    const r = stepMovement({ x: 22.5, z: 36.9 }, { x: 0, z: -1 }, 0, 0.1, walkBlocked); // S at yaw 0 -> +z
+    expect(r.z).toBeLessThan(37);
   });
   test('walls block', () => {
-    expect(walkBlocked(13, 5)).toBe(true); // lounge|corridor wall
+    expect(walkBlocked(20, 5)).toBe(true); // reading|corridor wall
   });
 });
 

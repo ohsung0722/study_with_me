@@ -1,12 +1,12 @@
 // Per-zone dimming: the zone I'm in stays at full brightness, other zones fade to OTHER_ZONE_BRIGHTNESS.
-// In the corridor (or outside) everything is at 1. Materials keep a base colour; colour = base × factor.
+// In a corridor or hall (or outside) everything is at 1. Materials keep a base colour; colour = base × factor.
 import * as THREE from 'three';
-import { OTHER_ZONE_BRIGHTNESS, ZONE_FADE_MS, type ZoneId } from '@studyverse/shared';
+import { MAP, OTHER_ZONE_BRIGHTNESS, ZONE_FADE_MS, zoneKind, type ZoneId } from '@studyverse/shared';
 
-export const ZONE_IDS: readonly ZoneId[] = ['lounge', 'corridor', 'reading', 'studyA', 'studyB'];
+export const ZONE_IDS = Object.keys(MAP.zones) as readonly ZoneId[];
 
 export function zoneTargets(current: ZoneId | null): Record<ZoneId, number> {
-  const all = current === null || current === 'corridor';
+  const all = current === null || zoneKind(current) === 'corridor';
   const out = {} as Record<ZoneId, number>;
   for (const z of ZONE_IDS) out[z] = all || z === current ? 1 : OTHER_ZONE_BRIGHTNESS;
   return out;

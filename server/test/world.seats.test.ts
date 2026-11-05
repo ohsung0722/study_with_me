@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { BUILDING_CAPACITY, MAP, kstDayKey, seatById, type Profile } from '@studyverse/shared';
 import { World } from '../src/game/world';
 import { openStore } from '../src/store/store';
-import { FakeOutbox, fakeClock } from './helpers';
+import { FakeOutbox, fakeClock, moveAfter } from './helpers';
 
 const prof = (anonId: string, nickname = '공부왕'): Profile => ({
   anonId, nickname, breakMinutes: 10,
@@ -11,14 +11,20 @@ const prof = (anonId: string, nickname = '공부왕'): Profile => ({
 
 function setup(start = 0) {
   const clock = fakeClock(start);
+  clockRef = clock;
   const store = openStore(':memory:');
   const out = new FakeOutbox();
   const world = new World({ now: clock.now, store, out });
   return { clock, store, out, world };
 }
+let clockRef: ReturnType<typeof fakeClock>;
 function nearSeat(world: World, id: string, seatId: string) {
   const s = seatById(seatId)!;
-  world.move(id, s.x, s.z + (s.facing === 0 ? -1 : 1), 0);
+  const t0 = clockRef.now();
+  // sofa props block their own front edge from behind; seat points of sofas are open floor
+  const dz = s.kind === 'sofa' ? 0 : s.facing === 0 ? -1 : 1;
+  moveAfter(world, clockRef, id, s.x, s.z + dz, 0);
+  clockRef.set(t0); // keep the scenario's own timeline intact
 }
 const joinAt = (w: World, id: string, anon: string, seatId: string) => {
   w.join(id, prof(anon, `user${anon}`));
@@ -65,7 +71,7 @@ describe('World seats/timer', () => {
     expect(world.realCount()).toBe(1);
   });
 
-  test('sit desk → studying focus=true; studyChair → focus=false; sofa keeps status', () => {
+  test('sit desk → studying focus=true; studyChair → focus=false; sofa keeps the lounge break', () => {
     const { world, out } = setup(1000);
     joinAt(world, 'a', 'A', 'R01');
     joinAt(world, 'b', 'B', 'A1');
@@ -75,10 +81,10 @@ describe('World seats/timer', () => {
     expect(world.sit('c', 'S1')).toEqual({ ok: true });
     expect(world.view('a')!.status).toEqual({ kind: 'studying', startedAt: 1000, focus: true });
     expect(world.view('b')!.status).toEqual({ kind: 'studying', startedAt: 1000, focus: false });
-    expect(world.view('c')!.status).toEqual({ kind: 'none' });
+    expect(world.view('c')!.status).toEqual({ kind: 'break', endsAt: 11_000 + 10 * 60000 }); // entered the lounge 10s after join
     const va = world.view('a')!;
     expect(va).toMatchObject({ x: seatById('R01')!.x, z: seatById('R01')!.z, ry: seatById('R01')!.facing, seatId: 'R01' });
-    expect(out.find('toAll', 'playerUpdated').length).toBe(3);
+    expect(out.find('toAll', 'playerUpdated').length).toBe(6); // 3 zone changes + 3 sits
   });
 
   test('second player sitting on the same seat gets taken', () => {

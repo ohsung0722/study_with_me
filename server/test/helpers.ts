@@ -17,3 +17,13 @@ export function fakeClock(start = 0) {
   const now = () => t;
   return { now, set: (v: number) => { t = v; }, advance: (d: number) => { t += d; } };
 }
+
+/** Test-only: let enough fake time pass that movement validation allows a long step, then move. */
+export function moveAfter(
+  world: { move(id: string, x: number, z: number, ry: number): void },
+  clock: { advance(d: number): void },
+  id: string, x: number, z: number, ry = 0, ms = 10_000,
+) {
+  clock.advance(ms);
+  world.move(id, x, z, ry);
+}

@@ -1,7 +1,10 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
-  BUILDING_CAPACITY, BUILDING_ID, INTERACT_RANGE, MAP, kstDayKey, seatById, validateNickname, zoneAt,
-  type JoinResult, type PlayerView, type Profile, type SitResult,
+  BUILDING_CAPACITY, BUILDING_ID, INTERACT_RANGE, MAP, PLAYER_RADIUS, TODAY_BROADCAST_MS, WALK_SPEED,
+  isBlocked, kstDayKey, seatById, validateNickname, zoneAt,
+  type JoinResult, type PlayerView, type Profile, type SitResult, type TodayStats,
 } from '@studyverse/shared';
+import { computeToday } from './today';
 import type { RecordStore } from '../store/store';
 import type { Outbox } from './outbox';
 
@@ -22,24 +25,30 @@ const toView = (p: PlayerState): PlayerView => ({
 
 export class World {
   private players = new Map<string, PlayerState>();
+  private movedIds = new Set<string>();
+  private lastTodayAt: number;
+  private lastToday: TodayStats | null = null;
 
-  constructor(private deps: WorldDeps) {}
+  constructor(private deps: WorldDeps) {
+    this.lastTodayAt = deps.now();
+  }
 
   join(connId: string, profile: Profile): JoinResult {
     const { now, store, out } = this.deps;
     const nick = validateNickname(profile.nickname);
     if (!nick.ok) return { ok: false, reason: 'nickname' };
-    if (this.realCount() >= BUILDING_CAPACITY) return { ok: false, reason: 'full' };
-
     for (const p of [...this.players.values()]) {
       if (!p.isNpc && p.anonId === profile.anonId) {
         this.saveSession(p);
         out.kick(p.id, 'replaced');
         this.players.delete(p.id);
+        this.movedIds.delete(p.id);
         out.setRoom(p.id, null);
         out.toAllExcept(connId, 'playerLeft', { id: p.id, npc: false });
       }
     }
+
+    if (this.realCount() >= BUILDING_CAPACITY) return { ok: false, reason: 'full' };
 
     store.upsertProfile(profile.anonId, nick.value);
     const sp = MAP.spawn;
@@ -57,7 +66,7 @@ export class World {
     return {
       ok: true, selfId: connId, serverNow: t,
       players: [...this.players.values()].map(toView),
-      today: store.todayStats(day, BUILDING_ID),
+      today: this.liveToday(),
       myTodaySec: store.userDaySec(profile.anonId, day),
     };
   }
@@ -67,16 +76,72 @@ export class World {
     if (!p) return;
     this.saveSession(p);
     this.players.delete(connId);
+    this.movedIds.delete(connId);
     this.deps.out.setRoom(connId, null);
     this.deps.out.toAllExcept(connId, 'playerLeft', { id: connId, npc: false });
   }
 
-  // Minimal movement (Task 6 adds validation, zones, snapshots).
   move(connId: string, x: number, z: number, ry: number): void {
     const p = this.players.get(connId);
     if (!p || p.seatId) return;
+    const { now, out } = this.deps;
+    const t = now();
+    const dt = Math.max(0, (t - p.lastMoveAt) / 1000);
+    const valid = Number.isFinite(x) && Number.isFinite(z) && Number.isFinite(ry)
+      && Math.hypot(x - p.x, z - p.z) <= WALK_SPEED * dt * 1.5 + 0.5
+      && !isBlocked(x, z, PLAYER_RADIUS * 0.5)
+      && zoneAt(x, z) !== null;
+    if (!valid) {
+      out.toPlayer(connId, 'correct', { x: p.x, z: p.z });
+      return;
+    }
     p.x = x; p.z = z; p.ry = ry;
-    p.lastMoveAt = this.deps.now();
+    p.lastMoveAt = t;
+    this.movedIds.add(connId);
+
+    const zone = zoneAt(x, z);
+    if (zone !== p.zone) {
+      p.zone = zone;
+      out.setRoom(connId, zone ? `${BUILDING_ID}:${zone}` : null);
+      if (zone === 'lounge' && p.status.kind !== 'studying') {
+        p.status = { kind: 'break', endsAt: t + p.breakMinutes * 60000 };
+      } else if (zone !== 'lounge' && p.status.kind === 'break') {
+        p.status = { kind: 'none' };
+      }
+      out.toAll('playerUpdated', toView(p));
+    }
+  }
+
+  setBreakMinutes(connId: string, minutes: 5 | 10 | 15): void {
+    const p = this.players.get(connId);
+    if (!p || (minutes !== 5 && minutes !== 10 && minutes !== 15)) return;
+    p.breakMinutes = minutes;
+    if (p.status.kind === 'break') {
+      p.status = { kind: 'break', endsAt: this.deps.now() + minutes * 60000 };
+      this.deps.out.toAll('playerUpdated', toView(p));
+    }
+  }
+
+  /** Called at TICK_HZ: position snapshot of movers, then the periodic live "today" stats. */
+  tick(): void {
+    const { now, out } = this.deps;
+    const t = now();
+    if (this.movedIds.size > 0) {
+      const moved = [...this.movedIds].flatMap((id) => {
+        const p = this.players.get(id);
+        return p ? [{ id, x: p.x, z: p.z, ry: p.ry }] : [];
+      });
+      this.movedIds.clear();
+      if (moved.length > 0) out.toAll('snapshot', { t, moved });
+    }
+    if (t - this.lastTodayAt >= TODAY_BROADCAST_MS) {
+      this.lastTodayAt = t;
+      const today = this.liveToday();
+      if (!isDeepStrictEqual(today, this.lastToday)) {
+        this.lastToday = today;
+        out.toAll('today', today);
+      }
+    }
   }
 
   sit(connId: string, seatId: string): SitResult {
@@ -121,6 +186,10 @@ export class World {
 
   shutdown(): void {
     for (const p of this.players.values()) this.saveSession(p);
+  }
+
+  private liveToday(): TodayStats {
+    return computeToday(this.deps.store, BUILDING_ID, this.players.values(), this.deps.now());
   }
 
   /** Persist an open studying session ending now; restarts the timer so it is never double counted. */

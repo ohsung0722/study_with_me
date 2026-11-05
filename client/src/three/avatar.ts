@@ -112,7 +112,7 @@ function waveMaterial(): THREE.SpriteMaterial {
 }
 
 export function createAvatar(a: Appearance): AvatarRig {
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65 });
+  const material = new THREE.MeshLambertMaterial({ vertexColors: true }); // matte; cheaper than PBR
   const own: THREE.BufferGeometry[] = []; // per-avatar geometries to dispose
   const mesh = (geo: THREE.BufferGeometry, parent: THREE.Object3D, shared = false) => {
     const m = new THREE.Mesh(geo, material);

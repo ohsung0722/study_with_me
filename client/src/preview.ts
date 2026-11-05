@@ -99,7 +99,8 @@ ctx.renderer.domElement.addEventListener('wheel', e => { dist = Math.min(60, Mat
 const rig = new CameraRig(ctx.camera, ctx.renderer.domElement);
 let seated: Seat | null = null;
 const myPos = new THREE.Vector3();
-const occluders = () => ctx.scene.children.filter(o => !actors.some(a => a.rig.root === o) && !(o as THREE.Light).isLight);
+let occluderList: THREE.Object3D[] | null = null; // built once (the scene's top level doesn't change after setup)
+const occluders = () => (occluderList ??= ctx.scene.children.filter(o => !actors.some(a => a.rig.root === o) && !(o as THREE.Light).isLight));
 
 // ---------- keys: 1/2 theme, 3-7 zone, 0 none ----------
 const ZONE_KEYS: Record<string, ZoneId> = { Digit3: 'lounge', Digit4: 'corridor', Digit5: 'reading', Digit6: 'studyA', Digit7: 'studyB' };
@@ -147,7 +148,8 @@ ctx.onFrame((dtMs) => {
   elapsed += dtMs / 1000;
   if (blender.update(dtMs)) applyTheme();
   dimmer.update(dtMs);
-  building.update(dtMs);
+  // the light pool follows "me" in the F view, else the orbit camera's target
+  building.update(dtMs, follow ? walker.rig.root.position : target);
 
   const serverNow = Date.now();
   for (const a of actors) {

@@ -99,7 +99,7 @@ export class BoardTexture {
 
   /** Puts the texture on the board mesh (named 'board' in building.ts). Colour stays with the zone dimmer. */
   attach(mesh: THREE.Mesh): void {
-    const m = mesh.material as THREE.MeshStandardMaterial;
+    const m = mesh.material as THREE.MeshLambertMaterial;
     m.map = this.texture;
     m.needsUpdate = true;
   }

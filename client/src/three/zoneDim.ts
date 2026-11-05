@@ -12,8 +12,8 @@ export function zoneTargets(current: ZoneId | null): Record<ZoneId, number> {
   return out;
 }
 
-/** Anything with a colour that can be scaled (standard or basic materials). */
-export type DimmableMaterial = THREE.MeshStandardMaterial | THREE.MeshBasicMaterial;
+/** Anything with a colour that can be scaled (lambert, standard or basic materials). */
+export type DimmableMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial | THREE.MeshBasicMaterial;
 
 interface Entry { m: DimmableMaterial; zone: ZoneId; base: THREE.Color }
 

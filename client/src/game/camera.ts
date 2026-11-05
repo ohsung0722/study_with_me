@@ -34,6 +34,13 @@ export class CameraRig {
   private ray = new THREE.Raycaster();
   private pos = new THREE.Vector3();
   private look = new THREE.Vector3();
+  // per-frame scratch (follow() allocates nothing)
+  private desired = new THREE.Vector3();
+  private lookAt = new THREE.Vector3();
+  private head = new THREE.Vector3();
+  private dir = new THREE.Vector3();
+  private hits: THREE.Intersection[] = [];
+  private pose: { seat: Seat; pos: P3; look: P3 } | null = null; // seatedCameraPose, cached per seat
   private inited = false;
   private readonly cleanup: Array<() => void> = [];
 
@@ -59,15 +66,15 @@ export class CameraRig {
   setSeatedView(seat: Seat | null): void { this.seat = seat; }
 
   follow(target: THREE.Vector3, dtMs: number, occluders: THREE.Object3D[]): void {
-    const desired = new THREE.Vector3();
-    const lookAt = new THREE.Vector3();
+    const { desired, lookAt, head, dir } = this;
     const s = this.seat;
     if (s) {
-      const pose = seatedCameraPose(s);
+      if (this.pose?.seat !== s) this.pose = { seat: s, ...seatedCameraPose(s) };
+      const pose = this.pose;
       desired.set(pose.pos.x, pose.pos.y, pose.pos.z);
       lookAt.set(pose.look.x, pose.look.y, pose.look.z);
     } else {
-      const head = new THREE.Vector3(target.x, target.y + HEAD_Y, target.z);
+      head.set(target.x, target.y + HEAD_Y, target.z);
       desired.set(
         head.x + Math.sin(this.yaw) * Math.cos(this.pitch) * this.dist,
         head.y + Math.sin(this.pitch) * this.dist,
@@ -75,12 +82,14 @@ export class CameraRig {
       );
       lookAt.copy(head);
       // occlusion: pull the camera in front of the first hit between the character and the camera
-      const dir = desired.clone().sub(head);
+      dir.copy(desired).sub(head);
       const full = dir.length();
       if (full > 1e-6 && occluders.length) {
         this.ray.set(head, dir.divideScalar(full));
         this.ray.camera = this.cam; this.ray.near = 0; this.ray.far = full;
-        const hit = this.ray.intersectObjects(occluders, true)[0];
+        this.hits.length = 0;
+        const hit = this.ray.intersectObjects(occluders, true, this.hits)[0];
+        this.hits.length = 0;
         if (hit) {
           const d = Math.max(0.4, hit.distance - 0.2);
           desired.copy(head).addScaledVector(this.ray.ray.direction, d);

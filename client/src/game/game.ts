@@ -80,6 +80,12 @@ export class Game {
   private timers: ReturnType<typeof setInterval>[] = [];
   private offs: (() => void)[] = [];
   private tmp = new THREE.Vector3();
+  private promptMe = {} as PlayerView; // my view + predicted position for pickPrompt (reused every frame)
+  /** ZoneDimmer factor where (x, z) is (1 outside every zone). A field so the frame loop doesn't allocate it. */
+  private dimAt = (x: number, z: number): number => {
+    const zn = zoneAt(x, z);
+    return zn ? this.dimmer.factor(zn) : 1;
+  };
 
   constructor(root: HTMLElement, private conn: GameConnection, join: JoinOk, profile: Profile) {
     this.profile = { ...profile };
@@ -285,10 +291,10 @@ export class Game {
     this.dimmer.setZone(myZone);
     this.dimmer.update(dtMs);
     if (this.blender.update(dtMs)) this.applyTheme();
-    this.building.update(dtMs);
+    this.building.update(dtMs, this.me); // the light pool follows me
 
     // avatars + labels, dimmed by the zone each one stands in
-    const dimAt = (x: number, z: number) => { const zn = zoneAt(x, z); return zn ? this.dimmer.factor(zn) : 1; };
+    const dimAt = this.dimAt;
     this.remotes.update(dtMs, serverNow, dimAt);
     const seat = this.myView.seatId ? seatById(this.myView.seatId) ?? null : null;
     this.myAvatar.place(this.me.x, this.me.z, this.me.ry, seat ? 'sit' : this.me.moving ? 'walk' : 'stand', dtMs);
@@ -307,9 +313,13 @@ export class Game {
     }
 
     // prompt (+E)
-    const prompt = this.online
-      ? pickPrompt({ ...this.myView, x: this.me.x, z: this.me.z }, this.remotes.views(), this.pending.get(Date.now()))
-      : null;
+    let prompt: Prompt | null = null;
+    if (this.online) {
+      const me = Object.assign(this.promptMe, this.myView);
+      me.x = this.me.x;
+      me.z = this.me.z;
+      prompt = pickPrompt(me, this.remotes.views(), this.pending.get(Date.now()));
+    }
     this.hud.setPrompt(prompt, this.promptNote(prompt));
     if (pressE && prompt) this.act(prompt, nowMs);
 

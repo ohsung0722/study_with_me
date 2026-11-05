@@ -1,7 +1,11 @@
 // Renderer, scene, camera, global lights and the requestAnimationFrame loop.
+// Performance: renders at most ~60 fps (FrameGate), adapts the pixel ratio to the measured frame time and drops
+// shadows once if even the lowest ratio is too slow (quality.ts). `?stats=1` shows a stats overlay.
 import * as THREE from 'three';
 import { MAP } from '@studyverse/shared';
 import type { Theme } from './theme';
+import { FrameGate, RefreshEstimator } from './frameCap';
+import { FAST_MS, initialQuality, stepQuality, type Tier } from './quality';
 import { StatsOverlay, statsEnabled } from '../ui/stats';
 
 export type FrameCallback = (dtMs: number, nowMs: number) => void;
@@ -19,11 +23,16 @@ export interface SceneCtx {
   dispose(): void;
 }
 
-const MAX_DT_MS = 100; // a stalled/hidden tab must not produce a huge step
+const MAX_DT_MS = 100;        // a stalled/hidden tab must not produce a huge step
+const SHADOW_MAP_SIZE = 1024; // 'high' tier; 'low' has no shadows
+const STATS_MS = 500;
 
 export function createScene(container: HTMLElement): SceneCtx {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const dpr = window.devicePixelRatio || 1;
+  const quality = initialQuality(dpr);
+  // MSAA only where pixels are big enough for jaggies to show; high-res screens get the resolution instead.
+  const renderer = new THREE.WebGLRenderer({ antialias: dpr < 1.5, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(quality.ratio);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.domElement.style.display = 'block';
@@ -39,10 +48,21 @@ export function createScene(container: HTMLElement): SceneCtx {
   key.position.set(cx + 8, 18, cz + 12);
   key.target.position.set(cx, 0, cz);
   key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
   key.shadow.bias = -0.0005;
   Object.assign(key.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, near: 1, far: 60 });
   scene.add(amb, key, key.target);
+
+  const applyTier = (tier: Tier) => {
+    if (tier !== 'low') return;
+    renderer.shadowMap.enabled = false; // one-time recompile of every material
+    key.castShadow = false;
+    scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (!m) return;
+      for (const mat of Array.isArray(m) ? m : [m]) mat.needsUpdate = true;
+    });
+  };
 
   const resize = () => {
     const w = Math.max(1, container.clientWidth), h = Math.max(1, container.clientHeight);
@@ -56,33 +76,60 @@ export function createScene(container: HTMLElement): SceneCtx {
   const ro = new ResizeObserver(resize);
   ro.observe(container);
 
-  const callbacks = new Set<FrameCallback>();
-  let raf = 0;
-  let last = 0;
+  // ---------- stats overlay (?stats=1) ----------
   const overlay = statsEnabled(location.search) ? new StatsOverlay(document.body) : null;
-  let statFrames = 0, statFrom = 0, statFrameSum = 0;
-  const showStats = (now: number, dt: number) => {
+  let statFrom = 0, statFrames = 0, statWorkSum = 0, statWorkN = 0;
+  const countLights = () => {
+    let n = 0;
+    scene.traverse((o) => { if ((o as THREE.PointLight).isPointLight && (o as THREE.PointLight).intensity > 0) n++; });
+    return n;
+  };
+  const showStats = (now: number) => {
     if (!overlay) return;
     statFrames++;
-    statFrameSum += dt;
     if (!statFrom) statFrom = now;
-    if (now - statFrom < 500) return;
-    let lights = 0;
-    scene.traverse((o) => { const l = o as THREE.PointLight; if (l.isPointLight && l.visible && l.intensity > 0.001) lights++; });
+    if (now - statFrom < STATS_MS) return;
     overlay.show({
-      fps: (statFrames * 1000) / (now - statFrom), frameMs: statFrameSum / statFrames,
+      fps: (statFrames * 1000) / (now - statFrom), frameMs: statWorkN ? statWorkSum / statWorkN : 0,
       calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
-      pixelRatio: renderer.getPixelRatio(), tier: 'n/a', lights,
+      pixelRatio: renderer.getPixelRatio(), tier: quality.tier, lights: countLights(),
     });
-    statFrames = 0; statFrameSum = 0; statFrom = now;
+    statFrom = now;
+    statFrames = statWorkSum = statWorkN = 0;
   };
+
+  // ---------- loop ----------
+  const callbacks: FrameCallback[] = [];
+  const gate = new FrameGate();
+  const refresh = new RefreshEstimator();
+  let raf = 0;
+  let last = 0;          // last rendered tick (for dt)
+  let lastTick = 0;      // last rAF tick (for the refresh estimate)
+  let renderedAt = -1;   // rendered tick waiting for its frame-time sample
   const loop = (now: number) => {
     raf = requestAnimationFrame(loop);
+    if (lastTick) refresh.observe(now - lastTick);
+    lastTick = now;
+    // Frame time = from a rendered tick to the next tick: our work plus however long the browser/GPU held the
+    // next frame back. On a display slower than FAST_MS per refresh, being vsync-bound counts as fast.
+    if (renderedAt >= 0) {
+      const sample = now - renderedAt;
+      renderedAt = -1;
+      statWorkSum += sample;
+      statWorkN++;
+      if (!document.hidden) {
+        const change = stepQuality(quality, sample, Math.max(FAST_MS, refresh.value() * 1.1));
+        if (change === 'ratio') renderer.setPixelRatio(quality.ratio);
+        else if (change === 'tier') applyTier(quality.tier);
+      }
+    }
+    if (!gate.shouldRender(now)) return;
     const dt = last ? Math.min(MAX_DT_MS, now - last) : 0;
     last = now;
-    for (const cb of callbacks) cb(dt, now);
+    for (let i = 0; i < callbacks.length; i++) callbacks[i](dt, now);
     renderer.render(scene, camera);
-    showStats(now, dt);
+    renderedAt = now;
+    showStats(now);
   };
 
   return {
@@ -95,12 +142,17 @@ export function createScene(container: HTMLElement): SceneCtx {
       key.intensity = t.keyI;
     },
     onFrame(cb) {
-      callbacks.add(cb);
-      return () => callbacks.delete(cb);
+      callbacks.push(cb);
+      return () => {
+        const i = callbacks.indexOf(cb);
+        if (i >= 0) callbacks.splice(i, 1);
+      };
     },
     start() {
       if (raf) return;
-      last = 0;
+      last = lastTick = 0;
+      renderedAt = -1;
+      gate.reset();
       raf = requestAnimationFrame(loop);
     },
     stop() {
@@ -111,7 +163,7 @@ export function createScene(container: HTMLElement): SceneCtx {
       cancelAnimationFrame(raf);
       raf = 0;
       ro.disconnect();
-      callbacks.clear();
+      callbacks.length = 0;
       overlay?.dispose();
       renderer.dispose();
       renderer.domElement.remove();

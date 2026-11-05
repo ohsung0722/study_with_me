@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
 import {
-  BUILDING_CAPACITY, BUILDING_ID, INTERACT_RANGE, MAP, PLAYER_RADIUS, TODAY_BROADCAST_MS, WALK_SPEED,
+  BUILDING_CAPACITY, BUILDING_ID, DRINKS, DRINK_LIFETIME_MS, GREET_TOAST_MS, INTERACT_RANGE, MAP, PLAYER_RADIUS, TODAY_BROADCAST_MS, WALK_SPEED,
   isBlocked, kstDayKey, seatById, validateNickname, zoneAt,
-  type JoinResult, type PlayerView, type Profile, type SitResult, type TodayStats,
+  type DrinkId, type GreetResult, type JoinResult, type PlayerView, type Profile, type SitResult, type TodayStats,
 } from '@studyverse/shared';
 import { computeToday } from './today';
+import { pickGreetTarget } from './greetings';
 import type { RecordStore } from '../store/store';
 import type { Outbox } from './outbox';
 
@@ -28,6 +29,7 @@ export class World {
   private movedIds = new Set<string>();
   private lastTodayAt: number;
   private lastToday: TodayStats | null = null;
+  private pendingGreets = new Map<string, { fromId: string; at: number }>(); // target id -> latest greet
 
   constructor(private deps: WorldDeps) {
     this.lastTodayAt = deps.now();
@@ -56,7 +58,7 @@ export class World {
     const p: PlayerState = {
       id: connId, nickname: store.displayName(profile.anonId), appearance: profile.appearance, isNpc: false,
       x: sp.x, z: sp.z, ry: sp.facing, zone: zoneAt(sp.x, sp.z), seatId: null, status: { kind: 'none' }, drink: null,
-      anonId: profile.anonId, lastMoveAt: t, lastGreetAt: 0, breakMinutes: profile.breakMinutes, connected: true,
+      anonId: profile.anonId, lastMoveAt: t, lastGreetAt: -Infinity, breakMinutes: profile.breakMinutes, connected: true,
     };
     this.players.set(connId, p);
     out.setRoom(connId, p.zone ? `${BUILDING_ID}:${p.zone}` : null);
@@ -77,6 +79,7 @@ export class World {
     this.saveSession(p);
     this.players.delete(connId);
     this.movedIds.delete(connId);
+    this.pendingGreets.delete(connId);
     this.deps.out.setRoom(connId, null);
     this.deps.out.toAllExcept(connId, 'playerLeft', { id: connId, npc: false });
   }
@@ -126,6 +129,12 @@ export class World {
   tick(): void {
     const { now, out } = this.deps;
     const t = now();
+    for (const p of this.players.values()) {
+      if (p.drink && t >= p.drink.until) {
+        p.drink = null;
+        out.toAll('playerUpdated', toView(p));
+      }
+    }
     if (this.movedIds.size > 0) {
       const moved = [...this.movedIds].flatMap((id) => {
         const p = this.players.get(id);
@@ -172,6 +181,39 @@ export class World {
       });
     }
     this.deps.out.toAll('playerUpdated', toView(p));
+  }
+
+  greet(connId: string): GreetResult {
+    const p = this.players.get(connId);
+    if (!p) return { ok: false, reason: 'noTarget' };
+    const { now, out } = this.deps;
+    const t = now();
+    const r = pickGreetTarget(p, [...this.players.values()].map(toView), t);
+    if (!r.ok) return r;
+    p.lastGreetAt = t;
+    this.pendingGreets.set(r.targetId, { fromId: connId, at: t });
+    out.toAll('wave', { id: connId });
+    out.toPlayer(r.targetId, 'greeted', { fromId: connId, fromNick: p.nickname });
+    return r;
+  }
+
+  greetAccept(connId: string, fromId: string): void {
+    if (!this.players.has(connId)) return;
+    const g = this.pendingGreets.get(connId);
+    if (!g || g.fromId !== fromId || this.deps.now() - g.at > GREET_TOAST_MS) return;
+    this.pendingGreets.delete(connId);
+    this.deps.out.toAll('wave', { id: connId });
+  }
+
+  takeDrink(connId: string, drink: DrinkId): boolean {
+    const p = this.players.get(connId);
+    if (!p) return false;
+    const machine = (Object.keys(DRINKS) as (keyof typeof DRINKS)[]).find((m) => (DRINKS[m] as readonly string[]).includes(drink));
+    const spot = machine && MAP.interactables.find((i) => i.id === machine);
+    if (!spot || Math.hypot(p.x - spot.x, p.z - spot.z) > INTERACT_RANGE) return false;
+    p.drink = { id: drink, until: this.deps.now() + DRINK_LIFETIME_MS };
+    this.deps.out.toAll('playerUpdated', toView(p));
+    return true;
   }
 
   view(id: string): PlayerView | undefined {

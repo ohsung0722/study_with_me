@@ -26,11 +26,20 @@ test('startServer close() persists a seated client session', async () => {
     const j = await new Promise<JoinResult>((r) => c.emit('join', prof, r));
     expect(j.ok).toBe(true);
     // spawn (14.5,23) in corridor -> studyB door (x=16, z 20-22) -> near seat B1 (22.5, 19.95)
-    const path: [number, number][] = [
-      [14.5, 22], [14.5, 21], [15.5, 21], [16.5, 21], [17.5, 21], [18.5, 21], [19.5, 21], [20.5, 20.5], [21.5, 19.9],
-    ];
-    for (const [x, z] of path) { await sleep(100); c.emit('move', { x, z, ry: 0 }); }
-    await sleep(100);
+    const corrections: unknown[] = [];
+    c.on('correct', (p) => corrections.push(p));
+    const waypoints: [number, number][] = [[14.5, 23], [14.5, 21], [20.5, 21], [21.5, 19.9]];
+    // Steps <= 0.45 m: always within the server's speed budget (0.5 m + WALK_SPEED*dt*1.5), whatever the timer jitter.
+    for (let i = 1; i < waypoints.length; i++) {
+      const [x0, z0] = waypoints[i - 1], [x1, z1] = waypoints[i];
+      const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.45);
+      for (let k = 1; k <= n; k++) {
+        await sleep(100);
+        c.emit('move', { x: x0 + ((x1 - x0) * k) / n, z: z0 + ((z1 - z0) * k) / n, ry: 0 });
+      }
+    }
+    await sleep(150);
+    expect(corrections, 'server rejected a move').toEqual([]);
     const s = await new Promise<SitResult>((r) => c.emit('sit', { seatId: 'B1' }, r));
     expect(s).toEqual({ ok: true });
     await sleep(1100);

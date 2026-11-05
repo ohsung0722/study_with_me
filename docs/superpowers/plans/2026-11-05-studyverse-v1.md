@@ -156,11 +156,11 @@ export function isBlocked(x: number, z: number, radius?: number): boolean; // wa
 export function seatById(id: string): Seat | undefined;
 ```
 
-배치 값(빌더가 그대로 쓴다):
-- 구역: lounge `x0–13, z0–24` / corridor `x13–16, z0–24` / reading `x16–32, z0–12` / studyA `x16–32, z12–18` / studyB `x16–32, z18–24`. (스펙은 스터디룸을 "약 8×5m"로 잡았지만, 평면도를 지키려고 오른쪽 폭 16m를 그대로 쓴다. 실제 크기는 16×6m.)
-- 문(벽의 빈틈): lounge `x=13, z10–14` / reading `x=16, z9–11` / studyA `x=16, z14–16` / studyB `x=16, z20–22`. 입구 `z=24, x13–16`. 스터디룸이 복도와 맞닿는 벽(`x=16`)은 `glass: true`.
-- 열람실 24석: `R01`–`R24`. 6열 × 4행. 책상 중심 `x = 18.6 + 2.4·i (i=0..5)`, `z = 1.8 + 2.6·j (j=0..3)`, 책상 크기 1.6×0.8. 의자(=Seat 위치)는 책상 중심에서 `z+0.85`. facing은 책상 쪽(−z).
-- 스터디룸 테이블 중심 (24, 15), (24, 21), 크기 3×1.2. 의자 `A1`–`A6`, `B1`–`B6`. `x ∈ {22.5, 24, 25.5}`, 테이블 중심 기준 `z ± 1.05`.
+배치 값(빌더가 그대로 쓴다; v1.1 값으로 갱신 — 근거는 `docs/superpowers/specs/2026-11-05-space-v1.1.md`):
+- 구역: lounge `x0–13, z0–24` / corridor `x13–16, z0–24` / reading `x16–36, z0–14` / studyA `x16–36, z14–19` / studyB `x16–36, z19–24`. (스펙은 스터디룸을 "약 8×5m"로 잡았지만, 평면도를 지키려고 오른쪽 폭을 그대로 쓴다. 실제 크기는 20×5m. v1.0은 32m 건물에 reading `z0–12`, 스터디룸 16×6m.)
+- 문(벽의 빈틈): lounge `x=13, z10–14` / reading `x=16, z10–12` / studyA `x=16, z15.5–17.5` / studyB `x=16, z20.5–22.5` (v1.1). 입구 `z=24, x13–16`. 스터디룸이 복도와 맞닿는 벽(`x=16`)은 `glass: true`.
+- 열람실 24석: `R01`–`R24`. 6열 × 4행. 책상 중심 `x = 18.8 + 3.0·i (i=0..5)`, `z = 2.0 + 3.0·j (j=0..3)` (v1.1; 책상 사이 1.4m), 책상 크기 1.6×0.8. 의자(=Seat 위치)는 책상 중심에서 `z+0.85`. facing은 책상 쪽(−z).
+- 스터디룸 테이블 중심 (26, 16.5), (26, 21.5) (v1.1), 크기 3×1.2. 의자 `A1`–`A6`, `B1`–`B6`. `x ∈ {24.5, 26, 27.5}`, 테이블 중심 기준 `z ± 1.05`.
 - 라운지: 소파 2개(각 3석) + 빈백 2개 → `S1`–`S8`, kind `sofa`. 커피머신 `(1.0, 3.0)`, 자판기 `(1.0, 6.0)`, 라디오 `(6.5, 22.5)`, 기록판 `(6.5, 0.4)`. 큰 창은 라운지 뒷벽 `x=0` 쪽 `z4–20`.
 - spawn: `(14.5, 23, facing=π)` (안쪽을 바라봄).
 
@@ -478,7 +478,7 @@ test('drink near coffee machine ok; latte at vending fails; far away fails; expi
 **Interfaces:**
 - Produces:
 ```ts
-export const NPC_SEATS = ['R24', 'R19', 'R14'] as const;   // 입구에서 먼 안쪽 자리
+export const NPC_SEATS = ['R06', 'R04', 'R02'] as const;   // 입구·열람실 문에서 먼 안쪽 줄 (v1.1)
 export function npcTarget(realCount: number): number;      // >=3 → 0, 2 → 2, 0~1 → 3
 export function makeNpc(index: number, now: number, rand: () => number): PlayerView;
 // id `npc-${index+1}`, nickname '메이트', isNpc true, 자리 NPC_SEATS[index],

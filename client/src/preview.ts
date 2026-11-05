@@ -137,7 +137,11 @@ window.addEventListener('keydown', e => {
     curZone = ZONE_KEYS[e.code];
     const r = MAP.zones[curZone];
     want.set((r.x1 + r.x2) / 2, 0.8, (r.z1 + r.z2) / 2);
-    dist = 18;
+    // shallow rooms (the 5 m-deep study rooms) need a steep, high view to see past the 3 m walls
+    const shallow = r.z2 - r.z1 <= 6;
+    dist = shallow ? 22 : 18;
+    pitch = shallow ? 1.35 : 0.95;
+    if (shallow) yaw = 0;
   } else return;
   dimmer.setZone(curZone);
   updateHelp();

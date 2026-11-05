@@ -24,7 +24,7 @@ describe('remotePose', () => {
 
 describe('npcExitPath / pointAlong', () => {
   test('starts at the seat, steps back from the desk, ends at the reading-room door', () => {
-    const seat = seatById('R24')!;
+    const seat = seatById('R06')!; // an NPC seat in the back row, farthest from the door
     const path = npcExitPath(seat);
     expect(path[0]).toEqual({ x: seat.x, z: seat.z });
     expect(path[1].z).toBeGreaterThan(seat.z); // desk is at -z (seat faces PI): back away to +z
@@ -34,7 +34,8 @@ describe('npcExitPath / pointAlong', () => {
     expect(end.z).toBeLessThanOrEqual(12);
   });
   test('the path never passes through desks or walls (sampled every 5 cm) for every NPC seat', () => {
-    for (const id of ['R24', 'R19', 'R14', 'R01', 'R06']) {
+    // NPC seats (server NPC_SEATS: R06, R04, R02), fallback desks (highest free ids) and the corner desk by the door aisle
+    for (const id of ['R06', 'R04', 'R02', 'R24', 'R23', 'R19', 'R01']) {
       const path = npcExitPath(seatById(id)!);
       let len = 0;
       for (let i = 1; i < path.length; i++) len += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);

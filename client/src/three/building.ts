@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MAP, zoneAt, type Prop, type Rect, type Wall, type ZoneId } from '@studyverse/shared';
-import { DAY, NIGHT, lerpTheme, type Theme } from './theme';
+import { DAY, NIGHT, lerpHex, lerpTheme, type Theme } from './theme';
 import type { ZoneDimmer } from './zoneDim';
 import { LightPool, type LampSource } from './lightPool';
 import { GlowLayer, glowQuad, glowTexture } from './glow';
@@ -18,13 +18,18 @@ const FIXED = {
   studyChair: 0x5f7f99, radio: 0x9b6b4a, rug: 0xb5835a, mat: 0x5a4636, runner: 0xead9b8,
 } as const;
 type FixedRole = keyof typeof FIXED;
-// 'decor': small lounge decor (books, art, pots, stools, armchair, rugs) with per-vertex colours — one material and
-// one draw call per zone however many colours it uses.
+// 'decor': small lounge decor (books, art, small plants, stools, armchair, rugs) with per-vertex colours — one
+// material and one draw call per zone however many colours it uses. It casts no shadows (hundreds of small boxes).
 type Role = ThemedRole | FixedRole | 'glass' | 'decor';
 const THEMED: readonly ThemedRole[] = ['floor', 'wall', 'desk', 'part'];
 
-/** Slight per-zone floor variation so rooms read as distinct spaces; the corridor is the lightest (v1.1). */
-const FLOOR_TINT: Record<ZoneId, number> = { lounge: 1.1, corridor: 1.6, reading: 1, studyA: 1.05, studyB: 1.05 };
+/** Slight per-zone floor variation so rooms read as distinct spaces (the corridor floor: see corridorFloor()). */
+const FLOOR_TINT: Record<ZoneId, number> = { lounge: 1.1, corridor: 1, reading: 1, studyA: 1.05, studyB: 1.05 };
+// Corridor floor (v1.1): by day the theme's wood blended toward a light sand/oak (lighter and less saturated than
+// scaling the dark wood); by night the lamp-lit version (CORRIDOR_NIGHT_KEEP) brightened × CORRIDOR_NIGHT_FLOOR.
+const CORRIDOR_SAND = 0xc9a77c;
+const CORRIDOR_SAND_MIX = 0.75;
+const CORRIDOR_NIGHT_FLOOR = 1.6;
 /** Per-zone wall brightness (the corridor's walls are a lighter plaster). */
 const WALL_TINT: Record<ZoneId, number> = { lounge: 1, corridor: 1.15, reading: 1, studyA: 1, studyB: 1 };
 const ZONES = Object.keys(MAP.zones) as ZoneId[];
@@ -71,6 +76,8 @@ const GLOW = {
   sconceFloor: { r: 2.8, k: 2.2 }, sconceWall: { r: 1.8, k: 2.0 },
 };
 const SCONCE_WALL_SHEEN = 0.08; // untinted warm wash on the wall (shows on the dark night plaster too)
+// By day the warm sconce pools are toned down further (on the light sand floor they read as orange stains).
+const SCONCE_GLOW_DAY = { floor: 0.35, wall: 0.7 };
 // Lamp fill: what the many lamps of a zone used to add to its walls, partitions, chairs and furniture, as an emissive
 // term = surface colour × lamp colour × FILL × the zone's average lamp level (minus what the pool lights carry).
 const FILL: Record<LampKind, Partial<Record<Role, number>> & { other: number }> = {
@@ -82,6 +89,7 @@ const FILL: Record<LampKind, Partial<Record<Role, number>> & { other: number }> 
 // By day the room is already bright and the lamps only warm their surroundings: the uniform fill is turned down
 // (less so in the corridor, whose sconces are what makes it read bright and inviting).
 const FILL_DAY: Record<LampKind, number> = { desk: 0.3, lounge: 0.3, pendant: 0.3, sconce: 0.6 };
+const SCONCE_FLOOR_FILL_DAY = 0.3; // the corridor floor gets less of it (a warm fill on wood turns it orange)
 // The glow is blended after sRGB encoding, which over-brightens bright (daytime) surfaces more than dark ones.
 const GLOW_DAY = 0.3;
 // Matte (Lambert) surfaces have no specular term; the PBR materials used to show a soft warm sheen around lamps on
@@ -176,7 +184,7 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
   const smallPlant = (zone: ZoneId, o: Frame, lx: number, y: number, lz: number, rnd: () => number) => {
     dlocal(zone, POT_COLORS[Math.floor(rnd() * POT_COLORS.length)], o, new THREE.CylinderGeometry(0.07, 0.055, 0.12, 12), lx, y + 0.06, lz);
     const leaf = new THREE.SphereGeometry(0.11, 8, 6).scale(1, 0.8 + rnd() * 0.6, 1);
-    localPut(zone, 'leaf', o, leaf, lx, y + 0.2, lz);
+    dlocal(zone, FIXED.leaf, o, leaf, lx, y + 0.2, lz); // decor (no shadow), unlike the big plants' leaves
   };
 
   // ---------- floors ----------
@@ -552,7 +560,8 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = `${b.zone}:${b.role}`;
     mesh.receiveShadow = true;
-    mesh.castShadow = b.role !== 'glass' && b.role !== 'floor' && b.role !== 'rug' && b.role !== 'mat' && b.role !== 'runner';
+    mesh.castShadow = b.role !== 'glass' && b.role !== 'floor' && b.role !== 'rug' && b.role !== 'mat' && b.role !== 'runner'
+      && b.role !== 'decor';
     if (b.role === 'glass') mesh.renderOrder = 1;
     root.add(mesh);
     dim.register(b.zone, mat);
@@ -641,28 +650,30 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     ]);
   }
   // Corridor sconces: glow only (floor pool + wash on the wall segment behind), all at one corridor-wide level.
-  const sconceGlows: { id: number; g: GlowSpec; sheen: number }[] = [];
+  const sconceGlows: { id: number; g: GlowSpec; sheen: number; day: number }[] = [];
   const CORRIDOR = MAP.zones.corridor;
   for (const sc of SCONCES) {
     const n = sc.x < 14.5 ? 1 : -1;
     const fq = glowQuad(sc.x + n * 0.18, sc.z, GLOW.sconceFloor.r, CORRIDOR);
-    if (fq) sconceGlows.push({ id: glow.add('corridor', fq, GLOW_FLOOR_Y, FLOOR('corridor')), g: GLOW.sconceFloor, sheen: SHEEN.sconce });
+    if (fq) sconceGlows.push({ id: glow.add('corridor', fq, GLOW_FLOOR_Y, FLOOR('corridor')), g: GLOW.sconceFloor, sheen: SHEEN.sconce, day: SCONCE_GLOW_DAY.floor });
     const wallX = sc.x - n * 0.1; // wall centre line
     const seg = MAP.walls.find(w => !w.glass && Math.abs((w.x1 + w.x2) / 2 - wallX) < 0.01 && w.z1 <= sc.z && w.z2 >= sc.z);
     const wq = seg && glowQuad(sc.z, SCONCE_Y, GLOW.sconceWall.r, { x1: seg.z1, z1: 0, x2: seg.z2, z2: WALL_H });
-    if (wq) sconceGlows.push({ id: glow.addWall('corridor', sc.x + n * 0.006, wq, 'wall:corridor'), g: GLOW.sconceWall, sheen: SCONCE_WALL_SHEEN });
+    if (wq) sconceGlows.push({ id: glow.addWall('corridor', sc.x + n * 0.006, wq, 'wall:corridor'), g: GLOW.sconceWall, sheen: SCONCE_WALL_SHEEN, day: SCONCE_GLOW_DAY.wall });
   }
   glow.build();
   glow.setSurface('counterTop', FIXED.counterTop);
   const pool = new LightPool(root);
   const fills = zoneMats.map(({ m, zone, role }) => {
     const kind = ZONE_LAMP[zone];
-    return { m, zi: ZONES.indexOf(zone), k: FILL[kind][role] ?? FILL[kind].other, day: FILL_DAY[kind] };
+    const day = kind === 'sconce' && role === 'floor' ? SCONCE_FLOOR_FILL_DAY : FILL_DAY[kind];
+    return { m, zi: ZONES.indexOf(zone), k: FILL[kind][role] ?? FILL[kind].other, day };
   });
   const CORRIDOR_ZI = ZONES.indexOf('corridor');
   const zoneLevel = new Float64Array(ZONES.length), zoneLamps = new Float64Array(ZONES.length);
   for (const l of lamps) zoneLamps[l.zi]++;
   const lampColor = new THREE.Color();
+  const corridorFloor = new THREE.Color(), nightFloor = new THREE.Color();
 
   // ---------- lounge window (aligned to the inner face of the x=0 wall) with rain + moon ----------
   const win = MAP.windows[0];
@@ -754,8 +765,8 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     sconceShadeMat.emissiveIntensity = sconce * 0.95;
     zoneLevel[CORRIDOR_ZI] = sconce;
     for (let j = 0; j < sconceGlows.length; j++) {
-      const s = sconceGlows[j];
-      glow.set(s.id, s.g.k * sconce * fc * glowScale, s.g.k * s.sheen * sconce * glowScale);
+      const s = sconceGlows[j], gs = glowScale * (night + (1 - night) * s.day);
+      glow.set(s.id, s.g.k * sconce * fc * gs, s.g.k * s.sheen * sconce * gs);
     }
     glow.flush();
     // material colours are already dimmed (× factor), so the fill scales with the factor twice, like the glow
@@ -771,7 +782,10 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     applyTheme(t: Theme) {
       // The lit corridor keeps part of its daytime plaster and wood at night instead of going lofi-dark.
       const lit = lerpTheme(t, DAY, CORRIDOR_NIGHT_KEEP * t.rain);
+      corridorFloor.setHex(lerpHex(t.floor, CORRIDOR_SAND, CORRIDOR_SAND_MIX))
+        .lerp(nightFloor.setHex(lit.floor).multiplyScalar(CORRIDOR_NIGHT_FLOOR), t.rain);
       for (const { m, zone, role } of themedMats) {
+        if (zone === 'corridor' && role === 'floor') { dim.setBase(m, corridorFloor); continue; }
         const c = zone === 'corridor' ? lit : t;
         dim.setBase(m, c[role], role === 'floor' ? FLOOR_TINT[zone] : role === 'wall' ? WALL_TINT[zone] : 1);
       }
@@ -787,7 +801,10 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
       glow.setColor(t.lamp);
       lampColor.setHex(t.lamp);
       glow.setSurface('desk', t.desk);
-      for (const z of ZONES) glow.setSurface(FLOOR(z), (z === 'corridor' ? lit : t).floor, FLOOR_TINT[z]);
+      for (const z of ZONES) {
+        if (z === 'corridor') glow.setSurface(FLOOR(z), corridorFloor.getHex());
+        else glow.setSurface(FLOOR(z), t.floor, FLOOR_TINT[z]);
+      }
       lampI = t.lampI;
       night = t.rain;
       applyLampLevels(0);

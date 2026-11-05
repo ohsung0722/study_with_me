@@ -24,7 +24,8 @@ export function themeForHour(hour: number): Theme {
   return isNightHour(hour) ? NIGHT : DAY;
 }
 
-function lerpHex(a: number, b: number, k: number): number {
+/** Blend two sRGB hex colours per 8-bit channel; k in [0, 1]. */
+export function lerpHex(a: number, b: number, k: number): number {
   let out = 0;
   for (const shift of [16, 8, 0]) {
     const ca = (a >> shift) & 0xff, cb = (b >> shift) & 0xff;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { seatById, type Profile } from '@studyverse/shared';
+import { MAP, seatById, type Profile } from '@studyverse/shared';
 import { World } from '../src/game/world';
 import { NPC_SEATS, npcTarget } from '../src/game/npc';
 import { openStore } from '../src/store/store';
@@ -20,6 +20,18 @@ function setup() {
 
 describe('npc mates', () => {
   test('npcTarget table', () => { expect([0, 1, 2, 3, 10].map(npcTarget)).toEqual([3, 3, 2, 0, 0]); });
+
+  test('NPC seats are distinct desks in the reading-room row farthest from its door (x=16, z10–12)', () => {
+    const desks = MAP.seats.filter((s) => s.kind === 'desk');
+    const backZ = Math.min(...desks.map((s) => s.z));
+    expect(new Set(NPC_SEATS).size).toBe(NPC_SEATS.length);
+    for (const id of NPC_SEATS) {
+      const s = seatById(id)!;
+      expect(s.kind).toBe('desk');
+      expect(s.z).toBe(backZ);
+      expect(Math.hypot(s.x - 16, s.z - 11)).toBeGreaterThan(8);
+    }
+  });
 
   test('world adds 3 npcs on first tick with 1 real player, all focused at NPC_SEATS', () => {
     const { world, out, clock } = setup();
@@ -71,17 +83,17 @@ describe('npc mates', () => {
     world.tick();
     const j = world.join('b', prof('B'));
     expect(j.ok && j.players.filter((p) => p.isNpc).map((p) => p.id)).toEqual(['npc-1', 'npc-2', 'npc-3']);
-    expect(world.sit('b', 'R24')).toEqual({ ok: false, reason: 'taken' });
+    expect(world.sit('b', NPC_SEATS[0])).toEqual({ ok: false, reason: 'taken' });
   });
 
   test('npc takes the highest free desk when its seat is held by a real player', () => {
     const { world, clock } = setup();
     world.join('a', prof('A'));
-    const s = seatById('R24')!;
+    const s = seatById('R06')!; // npc-1's seat
     moveAfter(world, clock, 'a', s.x, s.z + 1, 0);
-    expect(world.sit('a', 'R24')).toEqual({ ok: true });
+    expect(world.sit('a', 'R06')).toEqual({ ok: true });
     world.tick();
-    expect(world.view('npc-1')!.seatId).toBe('R23');
-    expect(world.view('npc-2')!.seatId).toBe('R19');
+    expect(world.view('npc-1')!.seatId).toBe('R24'); // the highest free desk id
+    expect(world.view('npc-2')!.seatId).toBe('R04'); // its own seat is still free
   });
 });

@@ -1,6 +1,7 @@
 import { NPC_REAL_THRESHOLD, seatById, type Appearance, type PlayerView } from '@studyverse/shared';
 
-export const NPC_SEATS = ['R24', 'R19', 'R14'] as const; // far from the entrance
+// Back row of the reading room (z≈2.85), the row farthest from its door (x=16, z10–12) and the entrance; spread out.
+export const NPC_SEATS = ['R06', 'R04', 'R02'] as const;
 
 const NPC_APPEARANCES: readonly Appearance[] = [
   { hair: 'short', hairColor: '#2b2118', shirtColor: '#8a6fd6' },

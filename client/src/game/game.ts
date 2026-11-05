@@ -20,7 +20,7 @@ import { TabTitle } from '../ui/tabTitle';
 import { BoardTexture } from '../ui/boardTexture';
 import { breakEndCheck, breakLeftSec } from '../ui/breakWatch';
 import { Radio } from '../audio/radio';
-import { CameraRig } from './camera';
+import { CameraRig, forwardWeight } from './camera';
 import { InputState } from './input';
 import { stepMovement, walkBlocked } from './controller';
 import { MoveSender } from './moveSender';
@@ -284,6 +284,7 @@ export class Game {
       this.me.z = r.z;
       if (r.moving) this.me.ry = r.ry;
       this.me.moving = r.moving;
+      this.cam.autoFollow(this.me.ry, r.moving ? forwardWeight(axis) : 0, dtMs); // camera swings in behind me
       this.mover.update(nowMs, this.me);
     }
 

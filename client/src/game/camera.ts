@@ -12,6 +12,43 @@ type P3 = { x: number; y: number; z: number };
 const SEATED_WALL_MARGIN = 0.25; // keeps the seated camera this far inside its zone (walls are 0.1 thick each side)
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** How quickly the camera swings behind a walking character (time constant). */
+export const FOLLOW_TAU_MS = 450;
+/** After the player drags the camera, auto-follow waits this long before taking over again. */
+export const MANUAL_HOLD_MS = 1500;
+
+/**
+ * Eases the camera yaw toward "behind the character" (the camera sits at target + (sin yaw, cos yaw)·dist,
+ * so behind a character facing `facing` is yaw = facing + π). Shortest arc, frame-rate independent.
+ * `weight` (0..1) scales the pull; 0 leaves the yaw untouched.
+ */
+export function followYaw(yaw: number, facing: number, weight: number, dtMs: number, tauMs = FOLLOW_TAU_MS): number {
+  if (weight <= 0 || dtMs <= 0) return yaw;
+  const target = facing + Math.PI;
+  const delta = Math.atan2(Math.sin(target - yaw), Math.cos(target - yaw));
+  return yaw + delta * (1 - Math.exp(-dtMs / tauMs)) * Math.min(1, weight);
+}
+
+const PULL_IN_TAU_MS = 50;   // a wall comes between me and the camera: get in front of it quickly
+const EASE_OUT_TAU_MS = 400; // the wall is gone: drift back out gently instead of popping
+
+/** Camera boom length easing: fast when it must shorten (occlusion), slow when it may lengthen again. */
+export function approachDist(cur: number, target: number, dtMs: number): number {
+  const tau = target < cur ? PULL_IN_TAU_MS : EASE_OUT_TAU_MS;
+  return target + (cur - target) * Math.exp(-Math.max(0, dtMs) / tau);
+}
+
+/**
+ * How much the current input should swing the camera: full for W, none for S (walking toward the camera)
+ * or pure A/D (strafing would otherwise make the character circle), gentle for diagonals.
+ */
+export function forwardWeight(axis: { x: number; z: number }): number {
+  const len = Math.hypot(axis.x, axis.z);
+  if (len === 0) return 0;
+  const f = Math.max(0, axis.z / len);
+  return f * f;
+}
+
 /**
  * Seated view: behind (opposite facing) and above the seated avatar, looking over them at the desk.
  * Clamped into the seat's own zone so back-row desks and study-room chairs never put the camera in or behind a wall.
@@ -42,6 +79,8 @@ export class CameraRig {
   private hits: THREE.Intersection[] = [];
   private pose: { seat: Seat; pos: P3; look: P3 } | null = null; // seatedCameraPose, cached per seat
   private inited = false;
+  private manualHoldMs = 0; // auto-follow pauses while the player is steering the camera by hand
+  private boom = -1;        // current (eased) camera distance along the view ray; -1 = not initialised
   private readonly cleanup: Array<() => void> = [];
 
   constructor(private cam: THREE.PerspectiveCamera, dom: HTMLElement) {
@@ -57,6 +96,7 @@ export class CameraRig {
       this.yaw -= (e.clientX - this.drag.x) * 0.005;
       this.pitch = Math.min(MAX_PITCH, Math.max(MIN_PITCH, this.pitch + (e.clientY - this.drag.y) * 0.005));
       this.drag = { x: e.clientX, y: e.clientY };
+      this.manualHoldMs = MANUAL_HOLD_MS;
     });
     add(dom, 'wheel', (e: WheelEvent) => {
       this.dist = Math.min(MAX_DIST, Math.max(MIN_DIST, this.dist * (1 + Math.sign(e.deltaY) * 0.1)));
@@ -64,6 +104,17 @@ export class CameraRig {
   }
 
   setSeatedView(seat: Seat | null): void { this.seat = seat; }
+
+  /**
+   * Swing the camera behind the character while it walks forward. Call once per frame after movement with the
+   * character's facing and `forwardWeight(input axis)` (0 when not moving). Paused while seated, while dragging,
+   * and for MANUAL_HOLD_MS after a manual drag.
+   */
+  autoFollow(facing: number, weight: number, dtMs: number): void {
+    if (this.manualHoldMs > 0) this.manualHoldMs = Math.max(0, this.manualHoldMs - dtMs);
+    if (this.seat || this.drag || this.manualHoldMs > 0) return;
+    this.yaw = followYaw(this.yaw, facing, weight, dtMs);
+  }
 
   follow(target: THREE.Vector3, dtMs: number, occluders: THREE.Object3D[]): void {
     const { desired, lookAt, head, dir } = this;
@@ -81,19 +132,23 @@ export class CameraRig {
         head.z + Math.cos(this.yaw) * Math.cos(this.pitch) * this.dist,
       );
       lookAt.copy(head);
-      // occlusion: pull the camera in front of the first hit between the character and the camera
+      // occlusion: keep the camera in front of the first hit between the character and the camera.
+      // The boom shortens quickly and lengthens slowly, so walking past door frames doesn't make the view pop.
       dir.copy(desired).sub(head);
       const full = dir.length();
-      if (full > 1e-6 && occluders.length) {
-        this.ray.set(head, dir.divideScalar(full));
-        this.ray.camera = this.cam; this.ray.near = 0; this.ray.far = full;
-        this.hits.length = 0;
-        const hit = this.ray.intersectObjects(occluders, true, this.hits)[0];
-        this.hits.length = 0;
-        if (hit) {
-          const d = Math.max(0.4, hit.distance - 0.2);
-          desired.copy(head).addScaledVector(this.ray.ray.direction, d);
+      if (full > 1e-6) {
+        dir.divideScalar(full);
+        let allowed = full;
+        if (occluders.length) {
+          this.ray.set(head, dir);
+          this.ray.camera = this.cam; this.ray.near = 0; this.ray.far = full;
+          this.hits.length = 0;
+          const hit = this.ray.intersectObjects(occluders, true, this.hits)[0];
+          this.hits.length = 0;
+          if (hit) allowed = Math.max(0.4, hit.distance - 0.2);
         }
+        this.boom = this.boom < 0 ? allowed : Math.min(full, approachDist(this.boom, allowed, dtMs));
+        desired.copy(head).addScaledVector(dir, this.boom);
       }
     }
     const k = this.inited ? 1 - Math.exp(-dtMs / SMOOTH_MS) : 1;

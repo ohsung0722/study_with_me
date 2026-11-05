@@ -10,7 +10,7 @@ import { createAvatar, type AvatarRig } from './three/avatar';
 import { LabelSprite, labelText } from './three/label';
 import { InputState } from './game/input';
 import { stepMovement, walkBlocked } from './game/controller';
-import { CameraRig } from './game/camera';
+import { CameraRig, forwardWeight } from './game/camera';
 
 const view = document.getElementById('view')!;
 const help = document.getElementById('help')!;
@@ -97,6 +97,7 @@ ctx.renderer.domElement.addEventListener('wheel', e => { dist = Math.min(60, Mat
 
 // ---------- "me" camera rig (F toggles, C seats) ----------
 const rig = new CameraRig(ctx.camera, ctx.renderer.domElement);
+(window as unknown as { __preview: unknown }).__preview = { rig, walker }; // dev-only page: handle for manual/automated checks
 let seated: Seat | null = null;
 const myPos = new THREE.Vector3();
 let occluderList: THREE.Object3D[] | null = null; // built once (the scene's top level doesn't change after setup)
@@ -164,11 +165,13 @@ ctx.onFrame((dtMs) => {
   }
 
   if (!seated) {
-    const r = stepMovement(walker.view, input.axis(), rig.yaw, dtMs / 1000, walkBlocked);
+    const axis = input.axis();
+    const r = stepMovement(walker.view, axis, rig.yaw, dtMs / 1000, walkBlocked);
     walker.view.x = r.x; walker.view.z = r.z;
     walker.rig.root.position.set(r.x, 0, r.z);
     if (r.moving) walker.rig.root.rotation.y = r.ry;
     walker.rig.setPose(r.moving ? 'walk' : 'stand');
+    if (follow) rig.autoFollow(walker.rig.root.rotation.y, r.moving ? forwardWeight(axis) : 0, dtMs);
   }
   if (follow) {
     myPos.set(walker.rig.root.position.x, 0, walker.rig.root.position.z);

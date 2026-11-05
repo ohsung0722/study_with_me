@@ -30,8 +30,8 @@ describe('npcExitPath / pointAlong', () => {
     expect(path[1].z).toBeGreaterThan(seat.z); // desk is at -z (seat faces PI): back away to +z
     const end = path[path.length - 1];
     expect(end.x).toBeCloseTo(16, 5);
-    expect(end.z).toBeGreaterThanOrEqual(9);
-    expect(end.z).toBeLessThanOrEqual(11);
+    expect(end.z).toBeGreaterThanOrEqual(10); // reading door: x=16, z 10–12
+    expect(end.z).toBeLessThanOrEqual(12);
   });
   test('the path never passes through desks or walls (sampled every 5 cm) for every NPC seat', () => {
     for (const id of ['R24', 'R19', 'R14', 'R01', 'R06']) {

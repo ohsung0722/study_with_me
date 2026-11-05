@@ -25,10 +25,10 @@ test('startServer close() persists a seated client session', async () => {
     await new Promise<void>((r) => c.once('connect', () => r()));
     const j = await new Promise<JoinResult>((r) => c.emit('join', prof, r));
     expect(j.ok).toBe(true);
-    // spawn (14.5,23) in corridor -> studyB door (x=16, z 20-22) -> near seat B1 (22.5, 19.95)
+    // spawn (14.5,23) in corridor -> studyB door (x=16, z 20.5-22.5) -> near seat B1 (24.5, 20.45)
     const corrections: unknown[] = [];
     c.on('correct', (p) => corrections.push(p));
-    const waypoints: [number, number][] = [[14.5, 23], [14.5, 21], [20.5, 21], [21.5, 19.9]];
+    const waypoints: [number, number][] = [[14.5, 23], [14.5, 21.5], [23.5, 21.5], [24.3, 20.3]];
     // Steps <= 0.45 m: always within the server's speed budget (0.5 m + WALK_SPEED*dt*1.5), whatever the timer jitter.
     for (let i = 1; i < waypoints.length; i++) {
       const [x0, z0] = waypoints[i - 1], [x1, z1] = waypoints[i];

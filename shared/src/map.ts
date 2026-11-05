@@ -9,7 +9,10 @@ export interface Seat { id: string; zone: ZoneId; kind: SeatKind; x: number; z: 
 export type InteractableId = 'coffee' | 'vending' | 'radio' | 'board';
 export interface Interactable { id: InteractableId; x: number; z: number }
 export interface Wall extends Rect { glass: boolean }
-export interface Prop extends Rect { kind: 'desk' | 'table' | 'counter' | 'vending' | 'sofa' | 'beanbag' | 'board' | 'plant' }
+export interface Prop extends Rect {
+  kind: 'desk' | 'table' | 'counter' | 'vending' | 'sofa' | 'beanbag' | 'board' | 'plant'
+    | 'bookshelf' | 'coffeeTable' | 'windowBar' | 'bigPlant' | 'armchair';
+}
 
 const T = 0.1; // half wall thickness (thickness 0.2)
 
@@ -25,24 +28,24 @@ const rect = (kind: Prop['kind'], x1: number, z1: number, x2: number, z2: number
 const zones: Record<ZoneId, Rect> = {
   lounge: { x1: 0, z1: 0, x2: 13, z2: 24 },
   corridor: { x1: 13, z1: 0, x2: 16, z2: 24 },
-  reading: { x1: 16, z1: 0, x2: 32, z2: 12 },
-  studyA: { x1: 16, z1: 12, x2: 32, z2: 18 },
-  studyB: { x1: 16, z1: 18, x2: 32, z2: 24 },
+  reading: { x1: 16, z1: 0, x2: 36, z2: 14 },
+  studyA: { x1: 16, z1: 14, x2: 36, z2: 19 },
+  studyB: { x1: 16, z1: 19, x2: 36, z2: 24 },
 };
 
 const walls: Wall[] = [
   // outer
-  vWall(0, 0, 24), vWall(32, 0, 24),
-  hWall(0, -T, 32 + T),
-  hWall(24, -T, 13), hWall(24, 16, 32 + T), // entrance gap x13-16
+  vWall(0, 0, 24), vWall(36, 0, 24),
+  hWall(0, -T, 36 + T),
+  hWall(24, -T, 13), hWall(24, 16, 36 + T), // entrance gap x13-16
   // lounge | corridor (x=13), door z10-14
   vWall(13, 0, 10), vWall(13, 14, 24),
-  // corridor | right rooms (x=16), doors z9-11 (reading), z14-16 (studyA), z20-22 (studyB); study rooms are glass
-  vWall(16, 0, 9), vWall(16, 11, 12),
-  vWall(16, 12, 14, true), vWall(16, 16, 18, true),
-  vWall(16, 18, 20, true), vWall(16, 22, 24, true),
+  // corridor | right rooms (x=16), doors z10-12 (reading), z15.5-17.5 (studyA), z20.5-22.5 (studyB); study rooms are glass
+  vWall(16, 0, 10), vWall(16, 12, 14),
+  vWall(16, 14, 15.5, true), vWall(16, 17.5, 19, true),
+  vWall(16, 19, 20.5, true), vWall(16, 22.5, 24, true),
   // reading | studyA, studyA | studyB
-  hWall(12, 16, 32), hWall(18, 16, 32),
+  hWall(14, 16, 36), hWall(19, 16, 36),
 ];
 
 const DESK_W = 1.6, DESK_D = 0.8;
@@ -55,19 +58,20 @@ const interactables: Interactable[] = [
   { id: 'board', x: 6.5, z: 0.4 },
 ];
 
-// Reading room: 6 columns x 4 rows of desks; chair is 0.85 behind (+z) the desk centre, facing the desk (-z).
+// Reading room: 6 columns x 4 rows of desks on a 3 m pitch (1.4 m between desks, ~1.4 m lane behind the chairs,
+// ~2 m aisle along the corridor wall); chair is 0.85 behind (+z) the desk centre, facing the desk (-z).
 for (let j = 0; j < 4; j++) {
   for (let i = 0; i < 6; i++) {
-    const cx = 18.6 + 2.4 * i, cz = 1.8 + 2.6 * j;
+    const cx = 18.8 + 3.0 * i, cz = 2.0 + 3.0 * j;
     props.push(box('desk', cx, cz, DESK_W, DESK_D));
     seats.push({ id: `R${String(j * 6 + i + 1).padStart(2, '0')}`, zone: 'reading', kind: 'desk', x: cx, z: cz + 0.85, facing: Math.PI });
   }
 }
 
 // Study rooms: one 3x1.2 table each, 3 chairs per long side facing the table.
-for (const [prefix, zone, cz] of [['A', 'studyA', 15], ['B', 'studyB', 21]] as const) {
-  props.push(box('table', 24, cz, 3, 1.2));
-  [22.5, 24, 25.5].forEach((x, k) => {
+for (const [prefix, zone, cz] of [['A', 'studyA', 16.5], ['B', 'studyB', 21.5]] as const) {
+  props.push(box('table', 26, cz, 3, 1.2));
+  [24.5, 26, 27.5].forEach((x, k) => {
     seats.push({ id: `${prefix}${k + 1}`, zone, kind: 'studyChair', x, z: cz - 1.05, facing: 0 });
     seats.push({ id: `${prefix}${k + 4}`, zone, kind: 'studyChair', x, z: cz + 1.05, facing: Math.PI });
   });
@@ -91,12 +95,28 @@ props.push(rect('vending', 0.1, 5.4, 1.3, 6.6));    // vending machine
 props.push(rect('board', 5.6, 0.1, 7.4, 0.5));      // record board on the back wall
 props.push(box('plant', 12.2, 1.0, 0.6, 0.6), box('plant', 12.2, 23.0, 0.6, 0.6), box('plant', 0.7, 22.8, 0.6, 0.6));
 
+// Lounge decor (v1.1). Solid furniture collides like everything else; rugs, wall art, the clock and the bar stools
+// are client-only. Kept clear of the seat points, the machines' open sides, the lounge door and the walking loop
+// around the sofa group (see map.test.ts).
+props.push(
+  rect('bookshelf', 2.0, 0.1, 5.2, 0.5),      // back wall, left of the record board
+  rect('bookshelf', 7.8, 0.1, 11.0, 0.5),     // back wall, right of the record board
+  rect('bookshelf', 12.5, 3.0, 12.9, 8.0),    // x=13 wall, north of the door
+  rect('bookshelf', 12.5, 16.2, 12.9, 21.4),  // x=13 wall, south of the door
+  rect('bookshelf', 1.6, 23.5, 3.6, 23.9),    // low shelf in the reading nook
+  rect('coffeeTable', 4.75, 11.55, 6.25, 12.45), // between the two sofas
+  rect('windowBar', 0.1, 8.0, 0.6, 19.0),     // narrow counter along the big window
+  box('bigPlant', 0.75, 0.75, 0.8, 0.8),      // back corner
+  box('bigPlant', 12.3, 15.2, 0.8, 0.8),      // beside the lounge door
+  rect('armchair', 4.3, 22.4, 5.2, 23.3),     // reading nook by the radio (decor, not a seat)
+);
+
 export const MAP: {
-  width: 32; depth: 24; wallHeight: 3; zones: Record<ZoneId, Rect>;
+  width: 36; depth: 24; wallHeight: 3; zones: Record<ZoneId, Rect>;
   walls: Wall[]; props: Prop[]; seats: Seat[]; interactables: Interactable[];
   windows: Rect[]; spawn: { x: number; z: number; facing: number };
 } = {
-  width: 32, depth: 24, wallHeight: 3,
+  width: 36, depth: 24, wallHeight: 3,
   zones, walls, props, seats, interactables,
   windows: [{ x1: 0, z1: 4, x2: 0.2, z2: 20 }], // big lounge window in the back wall x=0
   spawn: { x: 14.5, z: 23, facing: Math.PI },

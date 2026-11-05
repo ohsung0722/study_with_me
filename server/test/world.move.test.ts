@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { BUILDING_CAPACITY, MAP, TODAY_BROADCAST_MS, kstDayKey, type Profile } from '@studyverse/shared';
+import { BUILDING_CAPACITY, INTERACT_RANGE, MAP, TODAY_BROADCAST_MS, kstDayKey, seatById, type Profile } from '@studyverse/shared';
 import { World } from '../src/game/world';
 import { openStore } from '../src/store/store';
 import { FakeOutbox, fakeClock, moveAfter } from './helpers';
@@ -76,16 +76,18 @@ describe('World movement', () => {
   test('sit through a wall is rejected (player zone must equal seat zone)', () => {
     const { world, clock } = setup();
     world.join('a', prof('A', '가나다'));
-    moveAfter(world, clock, 'a', 18.6, 12.3, 0); // studyA side of the z=12 wall
-    expect(world.view('a')!.zone).toBe('studyA');
-    expect(world.sit('a', 'R19')).toEqual({ ok: false, reason: 'far' });
+    moveAfter(world, clock, 'a', 24.5, 13.5, 0); // reading side of the z=14 wall
+    expect(world.view('a')!.zone).toBe('reading');
+    const a1 = seatById('A1')!; // study room A, just behind the wall
+    expect(Math.hypot(a1.x - 24.5, a1.z - 13.5)).toBeLessThanOrEqual(INTERACT_RANGE + 0.5); // close enough by distance
+    expect(world.sit('a', 'A1')).toEqual({ ok: false, reason: 'far' });
     expect(world.view('a')!.seatId).toBeNull();
   });
 
   test('move while seated is ignored', () => {
     const { world, out, clock } = setup();
     world.join('a', prof('A', '가나다'));
-    moveAfter(world, clock, 'a', 18.6, 3.0, 0);
+    moveAfter(world, clock, 'a', 18.8, 3.4, 0);
     expect(world.sit('a', 'R01')).toEqual({ ok: true });
     const before = world.view('a')!;
     out.calls.length = 0;
@@ -162,7 +164,7 @@ describe('World movement', () => {
 describe('World today stats', () => {
   function seat(world: World, clock: ReturnType<typeof fakeClock>, id: string, anon: string, nick: string) {
     world.join(id, prof(anon, nick));
-    moveAfter(world, clock, id, 18.6, 3.0, 0);
+    moveAfter(world, clock, id, 18.8, 3.4, 0);
     expect(world.sit(id, 'R01')).toEqual({ ok: true });
   }
 
@@ -207,7 +209,7 @@ describe('World today stats', () => {
     store.addSession({ anonId: 'B', buildingId: 'main', seatId: 'R02', startMs: clock.now() - 100_000, endMs: clock.now() - 40_000 });
     seat(world, clock, 'a', 'A', '숨은이');
     world.join('b', prof('B', '보이는이'));
-    moveAfter(world, clock, 'b', 20.6, 3.0, 0);
+    moveAfter(world, clock, 'b', 21.8, 3.4, 0);
     expect(world.sit('b', 'R02')).toEqual({ ok: true });
     store.setHidden('A', true); // flipped mid-session, e.g. by the admin CLI
     clock.advance(30_000);

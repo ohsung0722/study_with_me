@@ -21,7 +21,7 @@ export function remotePose(seated: boolean, movedM: number, dtMs: number, holdMs
   return { pose: seated ? 'sit' : hold > 0 ? 'walk' : 'stand', holdMs: hold };
 }
 
-const DOOR: Pt = { x: 16, z: 10 }; // reading room ↔ corridor door (x=16, z 9–11)
+const DOOR: Pt = { x: 16, z: 11 }; // reading room ↔ corridor door (x=16, z 10–12)
 const AISLE_X = 17.0;              // free strip between the corridor wall and the first desk column
 
 /** From a reading-room seat: step back from the desk, along the aisle behind the row, up the free strip, to the door. */

@@ -7,7 +7,7 @@ const now = Date.UTC(2026, 10, 5, 3, 0, 0); // 12:00 KST
 const day = kstDayKey(now);
 const seated = (status: PlayerView['status']): PlayerView => ({
   id: 'me', nickname: '나', appearance: { hair: 'short', hairColor: '#000000', shirtColor: '#ffffff' }, isNpc: false,
-  x: 18.6, z: 7.85, ry: Math.PI, zone: 'reading', seatId: 'R13', status, drink: null,
+  x: 18.8, z: 8.85, ry: Math.PI, zone: 'reading', seatId: 'R13', status, drink: null,
 });
 
 describe('standLocally', () => {

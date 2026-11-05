@@ -100,7 +100,7 @@ describe('fix wave: drink range and greetAccept focus guard', () => {
 
   test('greetAccept does nothing while the accepter studies with focus', () => {
     const { world, out, add } = setup();
-    add('b', '라마바', 18.6, 3.2); add('a', '가나다', 19.6, 3.2);
+    add('b', '라마바', 18.8, 3.4); add('a', '가나다', 19.8, 3.4); // b right behind R01's chair
     expect(world.greet('a')).toEqual({ ok: true, targetId: 'b' });
     expect(world.sit('b', 'R01')).toEqual({ ok: true }); // desk → focus
     world.greetAccept('b', 'a');

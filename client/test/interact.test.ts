@@ -8,28 +8,28 @@ const pv = (x: number, z: number, extra: Partial<PlayerView> = {}): PlayerView =
   isNpc: false, x, z, ry: 0, zone: null, seatId: null, status: { kind: 'none' }, drink: null, ...extra,
 });
 const focus: Status = { kind: 'studying', startedAt: 0, focus: true };
-const R01 = seatById('R01')!; // reading desk seat at (18.6, 2.65)
+const R01 = seatById('R01')!; // reading desk seat at (18.8, 2.85)
 
 describe('pickPrompt', () => {
   test('pickPrompt: near free desk → sit; seated → stand', () => {
-    const me = pv(18.6, 3.6);
+    const me = pv(18.8, 3.8);
     expect(pickPrompt(me, [], null)).toEqual({ kind: 'sit', seatId: 'R01', text: 'E 앉기' });
     // occupied by someone else → no sit prompt (the focused occupant next to me blocks greeting instead)
     expect(pickPrompt(me, [pv(R01.x, R01.z, { seatId: 'R01', status: focus })], null)).toEqual({ kind: 'focusBlocked', text: '🔒 집중 중' });
     // occupant out of greet range (moved away, seat still held) → nothing
     expect(pickPrompt(me, [pv(30, 11, { seatId: 'R01' })], null)).toBeNull();
     const seated = pv(R01.x, R01.z, { seatId: 'R01', status: focus });
-    expect(pickPrompt(seated, [pv(18.6, 3.6)], null)).toEqual({ kind: 'stand', text: 'E 일어나기' });
+    expect(pickPrompt(seated, [pv(18.8, 3.8)], null)).toEqual({ kind: 'stand', text: 'E 일어나기' });
   });
 
   test('pickPrompt: free seat within INTERACT_RANGE but in another zone → no sit prompt', () => {
-    // R06 sits 1.4 m from the reading room's outer wall (x=32). Just past it (zone null) is within range
-    // by distance, but the server rejects sitting across zones, so no prompt.
-    const R06 = seatById('R06')!;
-    const outside = pv(32, R06.z);
-    expect(Math.hypot(outside.x - R06.x, outside.z - R06.z)).toBeLessThanOrEqual(1.5);
+    // A1 sits 1.45 m from the reading|studyA wall (z=14). Just past it (zone reading, no reading seat in range)
+    // it is within range by distance, but the server rejects sitting across zones, so no prompt.
+    const A1 = seatById('A1')!;
+    const outside = pv(A1.x, 13.99);
+    expect(Math.hypot(outside.x - A1.x, outside.z - A1.z)).toBeLessThanOrEqual(1.5);
     expect(pickPrompt(outside, [], null)).toBeNull();
-    expect(pickPrompt(pv(31.9, R06.z), [], null)).toEqual({ kind: 'sit', seatId: 'R06', text: 'E 앉기' }); // same zone → sit
+    expect(pickPrompt(pv(A1.x, 14.05), [], null)).toEqual({ kind: 'sit', seatId: 'A1', text: 'E 앉기' }); // same zone → sit
   });
 
   test('pickPrompt: near focused player → focusBlocked; near normal player → greet', () => {
@@ -62,7 +62,7 @@ describe('pickPrompt', () => {
 
   test('pickPrompt: pending greet → acceptGreet takes priority over sit/greet', () => {
     const accept = { kind: 'acceptGreet', fromId: 'g1', text: 'E 인사 받기' };
-    expect(pickPrompt(pv(18.6, 3.6), [], 'g1')).toEqual(accept); // over sit
+    expect(pickPrompt(pv(18.8, 3.8), [], 'g1')).toEqual(accept); // over sit
     expect(pickPrompt(pv(3, 18), [pv(4, 18)], 'g1')).toEqual(accept); // over greet
     expect(pickPrompt(pv(1.9, 3), [], 'g1')).toEqual(accept); // over machine
     // seated on a sofa (not focus) → accept beats stand; seated in focus → stand

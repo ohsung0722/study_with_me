@@ -188,7 +188,9 @@ describe('map', () => {
     for (const k of ['bookshelf', 'coffeeTable', 'windowBar', 'bigPlant', 'armchair'] as const) expect(kinds).toContain(k);
     expect(kinds.filter(k => k === 'bookshelf').length).toBeGreaterThanOrEqual(3);
     for (const p of MAP.props.filter(pp => !V1_KINDS.has(pp.kind))) {
-      expect(zoneAt((p.x1 + p.x2) / 2, (p.z1 + p.z2) / 2), p.kind).toBe('lounge');
+      const zone = zoneAt((p.x1 + p.x2) / 2, (p.z1 + p.z2) / 2);
+      if (zone === 'studyA' || zone === 'studyB') continue; // v1.2 study-room furniture (see below)
+      expect(zone, p.kind).toBe('lounge');
     }
     // coffee table between the two sofas; window bar along the big window (x≈0, z≈8–19)
     const ct = MAP.props.find(p => p.kind === 'coffeeTable')!;
@@ -218,6 +220,52 @@ describe('map', () => {
     for (let z = d.z1 + PLAYER_RADIUS + 0.05; z <= d.z2 - PLAYER_RADIUS - 0.05 + 1e-9; z += 0.25) {
       expect(segmentClear({ x: d.x - 1.5, z }, { x: d.x, z }), `lounge door z=${z}`).toBe(true);
     }
+  });
+  test('study rooms are furnished: cabinet, coat rack, big plant and a low shelf, each wholly inside its room', () => {
+    for (const room of ['studyA', 'studyB'] as const) {
+      const r = MAP.zones[room];
+      const inRoom = MAP.props.filter(p => zoneAt((p.x1 + p.x2) / 2, (p.z1 + p.z2) / 2) === room);
+      const kinds = inRoom.map(p => p.kind);
+      for (const k of ['cabinet', 'coatRack', 'bigPlant', 'bookshelf', 'table'] as const) expect(kinds, room).toContain(k);
+      for (const p of inRoom) {
+        // inside the room, not poking into a wall (inner wall faces are 0.1 m in from the zone edges)
+        expect(p.x1, `${room} ${p.kind}`).toBeGreaterThanOrEqual(r.x1 + 0.1 - 1e-9);
+        expect(p.x2, `${room} ${p.kind}`).toBeLessThanOrEqual(r.x2 - 0.1 + 1e-9);
+        expect(p.z1, `${room} ${p.kind}`).toBeGreaterThanOrEqual(r.z1 + 0.1 - 1e-9);
+        expect(p.z2, `${room} ${p.kind}`).toBeLessThanOrEqual(r.z2 - 0.1 + 1e-9);
+      }
+    }
+  });
+  test('study rooms: every chair is reachable on foot from its door, and the door approach stays open', () => {
+    for (const [room, d] of [['studyA', DOORS.studyA], ['studyB', DOORS.studyB]] as const) {
+      const zm = (d.z1 + d.z2) / 2;
+      const dist = gridDistancesFrom({ x: d.x + 0.6, z: zm }); // just inside the door
+      for (const s of MAP.seats.filter(st => st.zone === room)) {
+        // the chair's own spot (not just a spot within reach of it) can be walked to
+        const cell = Math.floor(s.z / STEP) * COLS + Math.floor(s.x / STEP);
+        expect(dist[cell], s.id).toBeLessThan(Infinity);
+        expect(dist[cell], s.id).toBeLessThanOrEqual(16); // a short walk: ~8.5 m to the table plus going round it
+      }
+      for (let z = d.z1 + PLAYER_RADIUS + 0.05; z <= d.z2 - PLAYER_RADIUS - 0.05 + 1e-9; z += 0.25) {
+        expect(segmentClear({ x: d.x, z }, { x: d.x + 2.0, z }), `${room} door z=${z}`).toBe(true);
+      }
+      // the lane from the door to the table end runs straight down the room's middle
+      expect(segmentClear({ x: d.x + 0.6, z: zm }, { x: 24.0, z: zm }), `${room} lane`).toBe(true);
+    }
+  });
+  test('study rooms get windows on the outer east wall x=36 (room B also on the south wall); the walls stay solid', () => {
+    for (const room of ['studyA', 'studyB'] as const) {
+      const r = MAP.zones[room];
+      const east = MAP.windows.filter(w => w.x1 < 36 && w.x2 >= 36 - 1e-9 && w.z1 >= r.z1 && w.z2 <= r.z2);
+      expect(east, room).toHaveLength(1);
+      expect(east[0].z2 - east[0].z1, room).toBeGreaterThanOrEqual(2.5);
+      for (const w of east) expect(isBlocked(36, (w.z1 + w.z2) / 2)).toBe(true);
+    }
+    const south = MAP.windows.filter(w => w.z1 < 24 && w.z2 >= 24 - 1e-9);
+    expect(south).toHaveLength(1);
+    expect(zoneAt((south[0].x1 + south[0].x2) / 2, 23.5)).toBe('studyB');
+    expect(isBlocked((south[0].x1 + south[0].x2) / 2, 24)).toBe(true);
+    expect(MAP.windows[0]).toEqual({ x1: 0, z1: 4, x2: 0.2, z2: 20 }); // the lounge window stays first
   });
   test('a clear walking loop runs around the sofa group in the lounge', () => {
     const loop = [{ x: 2.5, z: 7.6 }, { x: 11, z: 7.6 }, { x: 11, z: 17 }, { x: 2.5, z: 17 }];

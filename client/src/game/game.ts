@@ -1,6 +1,6 @@
 // The running game: wires the 3D scene, my movement/camera, other players, HUD/lounge and the socket together.
-// Frame order: input → movement → MoveSender → ZoneDimmer.setZone/update → theme → Building.update → avatars/labels
-// → camera/vignette → pickPrompt (+E) → HUD. Rendering follows in the scene loop.
+// Frame order: input → movement → MoveSender → ZoneDimmer.setZone/update → theme → study-room occupancy (RoomLights)
+// → Building.update → avatars/labels → camera/vignette → pickPrompt (+E) → HUD. Rendering follows in the scene loop.
 import * as THREE from 'three';
 import {
   GREET_TOAST_MS, THEME_FADE_MS, kstDayKey, seatById, zoneAt,
@@ -30,6 +30,7 @@ import { Avatar, RemotePlayers } from './players';
 import { PendingGreet } from './social';
 import { devHourFromSearch, liveTodaySec } from './clock';
 import { maskBeforeStand, standLocally } from './selfState';
+import { RoomLights } from './roomLights';
 
 const THEME_CHECK_MS = 60_000;
 const BREAK_CHECK_MS = 1000;   // the break-end alert must also fire while the tab is hidden (no frames then)
@@ -44,6 +45,8 @@ export class Game {
   private view: HTMLDivElement;
   private ctx: SceneCtx;
   private dimmer = new ZoneDimmer();
+  private rooms = new RoomLights(); // study-room lights: on while anyone (me, players, NPCs) is inside
+  private markRoom = (x: number, z: number): void => this.rooms.mark(x, z); // a field: no per-frame closure
   private building: Building;
   private blender: ThemeBlender;
   private occluders: THREE.Object3D[] = [];
@@ -293,7 +296,11 @@ export class Game {
     this.dimmer.setZone(myZone);
     this.dimmer.update(dtMs);
     if (this.blender.update(dtMs)) this.applyTheme();
-    this.building.update(dtMs, this.me); // the light pool follows me
+    // study-room occupancy from everyone's position (others: where they were drawn last frame)
+    this.rooms.mark(this.me.x, this.me.z);
+    this.remotes.forEachPosition(this.markRoom);
+    this.rooms.update(dtMs);
+    this.building.update(dtMs, this.me, this.rooms); // the light pool follows me
 
     // avatars + labels, dimmed by the zone each one stands in
     const dimAt = this.dimAt;

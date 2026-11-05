@@ -183,6 +183,11 @@ export class RemotePlayers {
     return out;
   }
 
+  /** Calls fn with every remote avatar's rendered position (last update; leaving NPCs included while visible). */
+  forEachPosition(fn: (x: number, z: number) => void): void {
+    for (const r of this.map.values()) fn(r.x, r.z);
+  }
+
   update(dtMs: number, serverNow: number, dimAt: (x: number, z: number) => number): void {
     for (const [id, r] of this.map) {
       let x: number, z: number, ry: number, pose: Pose;

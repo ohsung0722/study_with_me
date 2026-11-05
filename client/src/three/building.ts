@@ -49,10 +49,16 @@ const LOUNGE_LIGHT_I = 10;    // full-night intensity (× night × lounge dim fa
 const LOUNGE_LIGHT_DIST = 8;
 const LOUNGE_LIGHT_DECAY = 1.1;
 const LOUNGE_SHADE = 0xf3e3c3;
-// One warm pendant over each study-room table, also on only at night.
-const PENDANT_Y = 2.0;        // bottom of the cord / top of the shade
-const PENDANT_I = 8;          // full-night intensity (× night × that room's dim factor)
+// Study rooms (v1.2): a warm pendant over each table plus two smaller ones over the room's ends. They are on while
+// someone is inside the room (RoomLevels: occupancy, day and night alike) and pool-light candidates like every lamp.
+const PENDANT_Y = 2.0;        // bottom of the cord / top of the shade (table pendant)
+const SIDE_PENDANT_Y = 2.25;  // the end pendants hang a little higher
+const SIDE_PENDANT_DX = 5.5;  // end pendants: this far either side of the table centre
+const PENDANT_I = 8;          // full intensity (× room light level × that room's dim factor)
 const PENDANT_DIST = 4.5;     // short range: stays inside its room (the other table is 5 m away)
+// Monitor screen brightness when its room is unlit (standby: nearly black) — full when the room is lit.
+const SCREEN_STANDBY = 0.05;
+const MONITOR_Y = 1.62;       // monitor centre height
 // Corridor wall sconces (v1.1): emissive shade + fake glow (floor pool and a wash on the wall behind) + lamp fill.
 // Never pool lights: the 6 real lights stay with the desk, lounge and pendant lamps. On by day too, softer.
 // x is the corridor-side wall face; all sit on opaque wall segments, clear of doors and glass.
@@ -62,17 +68,20 @@ const SCONCES: { x: number; z: number }[] = [
 const SCONCE_Y = 2.05;        // shade centre
 const SCONCE_DAY = 0.6;       // level by day (night = 1)
 const CORRIDOR_NIGHT_KEEP = 0.45; // share of the daytime floor/wall colours the lamp-lit corridor keeps at night
+// A lit study room at night keeps this share of its daytime colours (× the room's light level): the lights are on,
+// so its walls, floor and furniture show their real colours instead of the lofi navy. Unlit rooms stay lofi-dark.
+const STUDY_NIGHT_KEEP = 0.45;
 const PENDANT_DECAY = 1.1;
 const WALL_H = MAP.wallHeight;
 const DESK_H = 0.75;
 const DESK_TOP = DESK_H + 0.03;
-const RAIN_DROPS = 160;
+const RAIN_PER_M = 10;          // rain drops per metre of window
 // Fake glow pools: radius (m) and centre strength k at the lamp's full night intensity, fitted to what the real
 // light added (intensity × attenuation × cos / π at the pool's distance below the lamp; see glow.ts).
 const GLOW = {
   deskTop: { r: 1.5, k: 3 }, deskFloor: { r: 2.4, k: 0.9 },
   loungeTop: { r: 1, k: 3 }, loungeFloor: { r: 4, k: 2.5 },
-  pendantTop: { r: 2.6, k: 2.6 }, pendantFloor: { r: 4, k: 1.5 },
+  pendantTop: { r: 2.6, k: 2.6 }, pendantFloor: { r: 4, k: 1.5 }, pendantSide: { r: 3.2, k: 1.4 },
   sconceFloor: { r: 2.8, k: 2.2 }, sconceWall: { r: 1.8, k: 2.0 },
 };
 const SCONCE_WALL_SHEEN = 0.08; // untinted warm wash on the wall (shows on the dark night plaster too)
@@ -83,29 +92,34 @@ const SCONCE_GLOW_DAY = { floor: 0.35, wall: 0.7 };
 const FILL: Record<LampKind, Partial<Record<Role, number>> & { other: number }> = {
   desk: { part: 1.2, wall: 0.5, floor: 0.4, desk: 0.35, book: 0.3, metal: 0.5, other: 0.3 },
   lounge: { floor: 0.3, wall: 0.4, decor: 0.12, other: 0.4 },
-  pendant: { desk: 0.3, studyChair: 0.4, book: 0.5, other: 0.15 },
+  pendant: { desk: 0.3, studyChair: 0.4, book: 0.5, wall: 0.35, floor: 0.25, part: 0.4, decor: 0.12, other: 0.15 },
   sconce: { wall: 1.1, floor: 0.7, part: 0.8, runner: 0.35, mat: 0.4, other: 0.4 },
 };
 // By day the room is already bright and the lamps only warm their surroundings: the uniform fill is turned down
 // (less so in the corridor, whose sconces are what makes it read bright and inviting).
-const FILL_DAY: Record<LampKind, number> = { desk: 0.3, lounge: 0.3, pendant: 0.3, sconce: 0.6 };
+const FILL_DAY: Record<LampKind, number> = { desk: 0.3, lounge: 0.3, pendant: 0.5, sconce: 0.6 };
 const SCONCE_FLOOR_FILL_DAY = 0.3; // the corridor floor gets less of it (a warm fill on wood turns it orange)
 // The glow is blended after sRGB encoding, which over-brightens bright (daytime) surfaces more than dark ones.
 const GLOW_DAY = 0.3;
+const PENDANT_GLOW_DAY = 0.5; // a lit study room must read lit by day too (it's the "room in use" signal)
 // Matte (Lambert) surfaces have no specular term; the PBR materials used to show a soft warm sheen around lamps on
 // dark surfaces. The glow pools add it back (untinted, not taken over by pool lights, which are diffuse-only now).
 const SHEEN: Record<LampKind, number> = { desk: 0.01, lounge: 0.02, pendant: 0.03, sconce: 0.03 };
 const GLOW_FLOOR_Y = 0.025; // just above rugs/mats (0.02)
 const GLOW_LIFT = 0.003;    // above table/desk tops
 
+/** Study-room light levels (0..1 per zone; see game/roomLights.ts). Zones without occupancy lights read 0. */
+export interface RoomLevels { level(zone: ZoneId): number }
+
 export interface Building {
   applyTheme(t: Theme): void;
   seatMarkers: Map<string, THREE.Object3D>;
   /**
    * Animates the rain and keeps lamp glow / light intensities in step with zone dimming; the light pool follows
-   * `focus` (the camera's focus point: my avatar). Call every frame.
+   * `focus` (the camera's focus point: my avatar). `rooms`: the study rooms' occupancy light levels (absent = all
+   * off). Call every frame.
    */
-  update(dtMs: number, focus: { x: number; z: number }): void;
+  update(dtMs: number, focus: { x: number; z: number }, rooms?: RoomLevels): void;
 }
 
 /** A local frame: origin (x, z), local +z = facing direction (map facing convention). */
@@ -122,6 +136,31 @@ const ART: { bg: number; a: number; b: number }[] = [
 function seeded(seed: number): () => number {
   let s = seed >>> 0;
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+}
+
+/** A static presentation slide for the study-room monitors (sRGB canvas; blank where there is no 2D canvas). */
+function slideTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 144;
+  const g = c.getContext('2d');
+  if (g) {
+    g.fillStyle = '#f4efe6'; g.fillRect(0, 0, 256, 144);
+    g.fillStyle = '#4f6d8f'; g.fillRect(0, 0, 256, 30);
+    g.fillStyle = '#f4efe6'; g.fillRect(14, 10, 120, 10);                  // title
+    g.fillStyle = '#d9b26a'; g.fillRect(226, 9, 16, 12);
+    for (let k = 0; k < 4; k++) {                                            // bullets
+      g.fillStyle = '#c96b4b'; g.fillRect(16, 46 + k * 22, 6, 6);
+      g.fillStyle = '#6b6258'; g.fillRect(28, 47 + k * 22, 70 - (k % 2) * 22 + k * 6, 4);
+    }
+    const bars = [38, 62, 50, 84], cols = ['#7a9e7e', '#d9b26a', '#c96b4b', '#4f6d8f'];
+    g.fillStyle = '#9a9086'; g.fillRect(140, 128, 102, 2);                   // chart axis
+    bars.forEach((h, k) => { g.fillStyle = cols[k]; g.fillRect(148 + k * 24, 128 - h, 16, h); });
+    g.fillStyle = '#9a9086'; g.fillRect(230, 134, 14, 4);                    // slide number
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 /** Zone for a point, clamped into the building (outer-wall corners fall outside every zone). */
@@ -383,6 +422,45 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
         }
         break;
       }
+      case 'cabinet': {
+        // Low storage cabinet (study rooms): wood carcass, darker doors, a pale top with binders, papers and a plant.
+        const { o, W, D } = againstWall(pr, zone);
+        const H = 0.82, rnd = seeded(Math.round(cx * 13 + cz * 7));
+        localBox(zone, 'desk', o, W, H, D, 0, H / 2, 0);
+        const doors = Math.max(2, Math.round(W / 0.6)), dw = W / doors;
+        for (let k = 0; k < doors; k++) {
+          const lx = -W / 2 + dw * (k + 0.5);
+          localBox(zone, 'part', o, dw - 0.03, H - 0.12, 0.015, lx, H / 2 + 0.02, D / 2 + 0.0075);
+          localBox(zone, 'metal', o, 0.015, 0.12, 0.02, lx + (k % 2 ? -1 : 1) * (dw / 2 - 0.07), H / 2 + 0.1, D / 2 + 0.02);
+        }
+        dlocalBox(zone, 0xe9e2d4, o, W + 0.03, 0.03, D + 0.02, 0, H + 0.015, 0);
+        const top = H + 0.03;
+        for (let k = 0; k < 4; k++) {   // upright binders
+          dlocalBox(zone, BOOK_COLORS[Math.floor(rnd() * BOOK_COLORS.length)], o, 0.06, 0.3, 0.25, -W / 2 + 0.15 + k * 0.066, top + 0.15, -0.04);
+        }
+        dlocalBox(zone, 0xf7f6f1, o, 0.3, 0.05, 0.22, -0.05, top + 0.025, 0.02);  // a stack of paper
+        dlocalBox(zone, 0xd9b26a, o, 0.28, 0.02, 0.2, -0.04, top + 0.06, 0.03);
+        dlocal(zone, 0x4f6d8f, o, new THREE.CylinderGeometry(0.04, 0.036, 0.1, 12), 0.3, top + 0.05, 0);  // pen cup
+        [0x2a2a2a, 0xc0392b, 0x2f6fb5].forEach((c, k) =>
+          dlocal(zone, c, o, new THREE.CylinderGeometry(0.006, 0.006, 0.15, 6).rotateZ((k - 1) * 0.15), 0.3 + (k - 1) * 0.015, top + 0.12, 0));
+        smallPlant(zone, o, W / 2 - 0.2, top, 0, rnd);
+        break;
+      }
+      case 'coatRack': {
+        // Wooden coat stand by the door with a coat, a scarf and a tote bag on its hooks.
+        put(zone, 'part', new THREE.CylinderGeometry(0.19, 0.21, 0.04, 16), cx, 0.02, cz);
+        put(zone, 'part', new THREE.CylinderGeometry(0.022, 0.028, 1.74, 8), cx, 0.89, cz);
+        put(zone, 'part', new THREE.SphereGeometry(0.04, 10, 8), cx, 1.79, cz);
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+          box(zone, 'metal', 0.16, 0.014, 0.014, cx + Math.cos(a) * 0.08, 1.66, cz - Math.sin(a) * 0.08, a);
+        }
+        const coat = zone === 'studyA' ? 0x5f7f99 : 0x8a5a3a;
+        dput(zone, coat, new THREE.CapsuleGeometry(0.15, 0.55, 4, 10).scale(1, 1, 0.55), cx + 0.15, 1.2, cz + 0.02);
+        dput(zone, 0xc96b4b, new THREE.BoxGeometry(0.11, 0.62, 0.05), cx - 0.02, 1.38, cz + 0.13);   // scarf
+        dput(zone, 0xd9b26a, new THREE.BoxGeometry(0.1, 0.36, 0.3), cx - 0.13, 1.38, cz - 0.02);     // tote bag
+        break;
+      }
       case 'armchair': {
         // Reading-nook armchair turned toward the radio (decor, not a seat).
         const r = MAP.interactables.find(i => i.id === 'radio');
@@ -415,35 +493,110 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
   artOn({ x: 0.1, z: 3.0, facing: Math.PI / 2 }, 1.0, 0.6, 2.05, ART[2]);  // above the coffee machine
   artOn({ x: 12.9, z: 9.0, facing: -Math.PI / 2 }, 0.56, 0.78, 1.7, ART[3]); // by the lounge door
   artOn({ x: 0.1, z: 21.6, facing: Math.PI / 2 }, 0.7, 0.9, 1.6, ART[4]);  // reading nook
-  {
-    const o: Frame = { x: 6.5, z: 0.1, facing: 0 }, y = 2.55;                 // wall clock above the record board
-    const disc = (r: number, t: number) => new THREE.CylinderGeometry(r, r, t, 32).rotateX(Math.PI / 2);
-    localPut('lounge', 'part', o, disc(0.24, 0.05), 0, y, 0.025);
-    dlocal('lounge', 0xf6f0e2, o, disc(0.205, 0.012), 0, y, 0.056);
-    for (let k = 0; k < 12; k++) {
-      const a = (k / 12) * Math.PI * 2, len = k % 3 ? 0.018 : 0.035;
-      dlocal('lounge', 0x3a2a20, o, new THREE.BoxGeometry(0.01, len, 0.006).rotateZ(-a).translate(Math.sin(a) * 0.17, Math.cos(a) * 0.17, 0), 0, y, 0.064);
+  wallClock('lounge', { x: 6.5, z: 0.1, facing: 0 }, 2.55, 0.24); // above the record board
+
+  // ---------- study rooms (v1.2, client-only): rug, whiteboard (north wall), wall monitor (south wall), clock ----------
+  const studyRooms = MAP.props.filter(pp => pp.kind === 'table').map((t) => {
+    const cx = (t.x1 + t.x2) / 2, cz = (t.z1 + t.z2) / 2, zone = zoneOf(cx, cz);
+    return { zone, table: t as Rect, cx, cz, r: MAP.zones[zone] };
+  });
+  const screens: { zone: ZoneId; geo: THREE.BufferGeometry }[] = [];
+  studyRooms.forEach((room, ri) => {
+    const { zone, cx, cz, r } = room;
+    dput(zone, ri ? 0x7a5236 : 0x5d7286, new THREE.BoxGeometry(5.0, 0.008, 3.5), cx, 0.004, cz); // rug border
+    dput(zone, ri ? 0xb98b67 : 0x8fa3b3, new THREE.BoxGeometry(4.8, 0.012, 3.3), cx, 0.006, cz);
+    whiteboard(zone, { x: cx, z: r.z1 + 0.1, facing: 0 }, seeded(101 + ri * 7));
+    // monitor on the opposite wall, facing the whiteboard across the table; the screen is its own mesh (below)
+    const m: Frame = { x: cx, z: r.z2 - 0.1, facing: Math.PI };
+    dlocalBox(zone, 0x1c1e23, m, 1.72, 0.99, 0.05, 0, MONITOR_Y, 0.025);           // bezel
+    dlocalBox(zone, 0x2a2c31, m, 0.95, 0.07, 0.08, 0, MONITOR_Y - 0.6, 0.04);       // soundbar
+    screens.push({ zone, geo: new THREE.PlaneGeometry(1.6, 0.9).rotateY(Math.PI).translate(cx, MONITOR_Y, r.z2 - 0.1 - 0.052) });
+    const cab = MAP.props.find(pp => pp.kind === 'cabinet' && zoneOf((pp.x1 + pp.x2) / 2, (pp.z1 + pp.z2) / 2) === zone);
+    if (cab) wallClock(zone, { x: (cab.x1 + cab.x2) / 2, z: r.z1 + 0.1, facing: 0 }, 2.3, 0.2);
+  });
+
+  /** Whiteboard on a wall (o: centre of the wall face, facing into the room): marker writing, a sketch, sticky notes. */
+  function whiteboard(zone: ZoneId, o: Frame, rnd: () => number): void {
+    const W = 2.8, H = 1.15, y = 1.5, front = 0.0465, alu = 0xc3c7cc;
+    dlocalBox(zone, alu, o, W + 0.08, H + 0.08, 0.035, 0, y, 0.0175);   // aluminium frame
+    dlocalBox(zone, 0xf6f6f1, o, W, H, 0.01, 0, y, 0.04);               // board
+    const trayY = y - H / 2 - 0.06;
+    dlocalBox(zone, alu, o, 2.0, 0.02, 0.08, 0, trayY, 0.06);           // marker tray + lip
+    dlocalBox(zone, alu, o, 2.0, 0.04, 0.01, 0, trayY + 0.015, 0.1);
+    const marker = () => new THREE.CylinderGeometry(0.011, 0.011, 0.13, 8).rotateZ(Math.PI / 2);
+    ([[0x2a2a2a, -0.62], [0x2f6fb5, -0.45], [0xc0392b, -0.28], [0x2e8b57, 0.42]] as const)
+      .forEach(([c, lx]) => dlocal(zone, c, o, marker(), lx, trayY + 0.02, 0.065));
+    dlocalBox(zone, 0x3a3a3a, o, 0.14, 0.035, 0.05, 0.72, trayY + 0.027, 0.06); // eraser
+    const stroke = (c: number, lx: number, ly: number, len: number, rot = 0, th = 0.013) =>
+      dlocal(zone, c, o, new THREE.BoxGeometry(len, th, 0.004).rotateZ(rot), lx, y + ly, front);
+    const line = (c: number, x0: number, ly: number, len: number) => stroke(c, x0 + len / 2, ly, len);
+    const outline = (c: number, lx: number, ly: number, w: number, h: number) => {
+      stroke(c, lx, ly + h / 2, w); stroke(c, lx, ly - h / 2, w);
+      stroke(c, lx - w / 2, ly, h, Math.PI / 2); stroke(c, lx + w / 2, ly, h, Math.PI / 2);
+    };
+    // title + "notes" on the left
+    line(0x2a2a2a, -1.28, 0.44, 0.55 + rnd() * 0.15);
+    line(0xc0392b, -1.28, 0.405, 0.4);
+    for (let k = 0; k < 6; k++) {
+      const ly = 0.3 - k * 0.1;
+      stroke(0x2f6fb5, -1.25, ly, 0.025, 0, 0.025);               // bullet
+      line(k % 3 === 2 ? 0x2a2a2a : 0x2f6fb5, -1.2, ly, 0.25 + rnd() * 0.4);
     }
-    const hand = (len: number, wd: number, a: number) => new THREE.BoxGeometry(wd, len, 0.006).translate(0, len / 2 - 0.02, 0).rotateZ(-a);
-    dlocal('lounge', 0x2a2a2a, o, hand(0.11, 0.018, ((10 + 10 / 60) / 12) * Math.PI * 2), 0, y, 0.068); // 10:10
-    dlocal('lounge', 0x2a2a2a, o, hand(0.16, 0.012, (10 / 60) * Math.PI * 2), 0, y, 0.072);
-    dlocal('lounge', 0xc96b4b, o, disc(0.014, 0.012), 0, y, 0.078);
+    // a boxes-and-arrow sketch in the middle, with a few words in each box
+    outline(0x2f6fb5, 0.05, 0.27, 0.44, 0.26);
+    outline(0x2e8b57, 0.85, 0.27, 0.44, 0.26);
+    for (const bx of [0.05, 0.85]) for (let k = 0; k < 2; k++) line(0x2a2a2a, bx - 0.15, 0.31 - k * 0.08, 0.18 + rnd() * 0.1);
+    line(0x2a2a2a, 0.27, 0.27, 0.36);
+    stroke(0x2a2a2a, 0.6, 0.29, 0.07, -0.6);
+    stroke(0x2a2a2a, 0.6, 0.25, 0.07, 0.6);
+    // a circled formula and an underlined answer
+    dlocal(zone, 0xc0392b, o, new THREE.TorusGeometry(0.15, 0.007, 4, 28).scale(1.5, 1, 1), 0.3, y - 0.2, front);
+    for (let k = 0; k < 2; k++) line(0x2a2a2a, 0.12, -0.18 - k * 0.05, 0.3 + rnd() * 0.06);
+    line(0x2f6fb5, -0.35, -0.38, 0.4);
+    line(0x2f6fb5, -0.35, -0.42, 0.4);
+    // sticky notes on the right
+    const NOTE = [0xfff176, 0xf8bbd0, 0xa5d6a7, 0x90caf9, 0xffcc80];
+    for (let k = 0; k < 5; k++) {
+      const lx = 1.08 + (k % 2) * 0.14 + rnd() * 0.02, ly = 0.38 - Math.floor(k / 2) * 0.17 - rnd() * 0.03;
+      dlocal(zone, NOTE[k], o, new THREE.BoxGeometry(0.11, 0.11, 0.003).rotateZ((rnd() - 0.5) * 0.25), lx, y + ly, front);
+      line(0x555555, lx - 0.035, ly + 0.01, 0.06);
+    }
+  }
+
+  /** Wall clock (radius r) at height y, showing 10:10. */
+  function wallClock(zone: ZoneId, o: Frame, y: number, r: number): void {
+    const k = r / 0.24;
+    const disc = (rr: number, t: number) => new THREE.CylinderGeometry(rr, rr, t, 32).rotateX(Math.PI / 2);
+    localPut(zone, 'part', o, disc(r, 0.05), 0, y, 0.025);
+    dlocal(zone, 0xf6f0e2, o, disc(0.205 * k, 0.012), 0, y, 0.056);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2, len = (i % 3 ? 0.018 : 0.035) * k;
+      dlocal(zone, 0x3a2a20, o, new THREE.BoxGeometry(0.01 * k, len, 0.006).rotateZ(-a).translate(Math.sin(a) * 0.17 * k, Math.cos(a) * 0.17 * k, 0), 0, y, 0.064);
+    }
+    const hand = (len: number, wd: number, a: number) => new THREE.BoxGeometry(wd, len, 0.006).translate(0, len / 2 - 0.02 * k, 0).rotateZ(-a);
+    dlocal(zone, 0x2a2a2a, o, hand(0.11 * k, 0.018 * k, ((10 + 10 / 60) / 12) * Math.PI * 2), 0, y, 0.068); // 10:10
+    dlocal(zone, 0x2a2a2a, o, hand(0.16 * k, 0.012 * k, (10 / 60) * Math.PI * 2), 0, y, 0.072);
+    dlocal(zone, 0xc96b4b, o, disc(0.014 * k, 0.012), 0, y, 0.078);
+  }
+
+  /** Frame of a piece standing against the nearest wall of its zone: it faces away from that wall. */
+  function againstWall(pr: Prop, zone: ZoneId): { o: Frame; W: number; D: number } {
+    const r = MAP.zones[zone];
+    const gaps = [pr.z1 - r.z1, r.z2 - pr.z2, pr.x1 - r.x1, r.x2 - pr.x2];
+    const side = gaps.indexOf(Math.min(...gaps));
+    const alongX = side < 2;
+    return {
+      o: { x: (pr.x1 + pr.x2) / 2, z: (pr.z1 + pr.z2) / 2, facing: [0, Math.PI, Math.PI / 2, -Math.PI / 2][side] },
+      W: alongX ? pr.x2 - pr.x1 : pr.z2 - pr.z1, D: alongX ? pr.z2 - pr.z1 : pr.x2 - pr.x1,
+    };
   }
 
   /** Bookshelf against a wall: wooden carcass with shelves of books, small plants and odds and ends. */
   function buildShelf(pr: Prop, zone: ZoneId): void {
-    const r = MAP.zones[zone];
-    const cx = (pr.x1 + pr.x2) / 2, cz = (pr.z1 + pr.z2) / 2;
-    // which wall it stands against → it faces away from it
-    const gaps = [pr.z1 - r.z1, r.z2 - pr.z2, pr.x1 - r.x1, r.x2 - pr.x2];
-    const side = gaps.indexOf(Math.min(...gaps));
-    const facing = [0, Math.PI, Math.PI / 2, -Math.PI / 2][side];
-    const alongX = side < 2;
-    const W = alongX ? pr.x2 - pr.x1 : pr.z2 - pr.z1, D = alongX ? pr.z2 - pr.z1 : pr.x2 - pr.x1;
+    const { o, W, D } = againstWall(pr, zone); // faces away from the wall it stands against
     const tall = W > 2.2;
     const H = tall ? 1.85 : 0.95;
-    const o: Frame = { x: cx, z: cz, facing };
-    const rnd = seeded(Math.round(cx * 31 + cz * 17));
+    const rnd = seeded(Math.round(o.x * 31 + o.z * 17));
     localBox(zone, 'desk', o, W, H, 0.03, 0, H / 2, -D / 2 + 0.015);                       // back
     for (const sx of [-1, 1]) localBox(zone, 'desk', o, 0.05, H, D, sx * (W / 2 - 0.025), H / 2, 0); // sides
     const units = Math.max(1, Math.round(W / 1.6));                                          // uprights every ~1.6 m
@@ -517,14 +670,21 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     loungeLightSpots.push(new THREE.Vector3(l.x, l.baseY + poleH, l.z));
   }
 
-  // Study-room pendants: cord into the room's metal bucket; shade gets its own material (dimmed per room).
-  const pendants: { zone: ZoneId; shade: THREE.BufferGeometry; pos: THREE.Vector3; table: Rect }[] = [];
-  for (const pr of MAP.props.filter(pp => pp.kind === 'table')) {
-    const cx = (pr.x1 + pr.x2) / 2, cz = (pr.z1 + pr.z2) / 2, zone = zoneOf(cx, cz);
-    put(zone, 'metal', new THREE.CylinderGeometry(0.008, 0.008, WALL_H - PENDANT_Y, 6), cx, (WALL_H + PENDANT_Y) / 2, cz);
-    const shade = new THREE.CylinderGeometry(0.07, 0.3, 0.22, 24, 1, true);
-    shade.translate(cx, PENDANT_Y - 0.11, cz);
-    pendants.push({ zone, shade, pos: new THREE.Vector3(cx, PENDANT_Y - 0.25, cz), table: pr });
+  // Study-room pendants (one over the table, two smaller ones over the room's ends): cords into the room's metal
+  // bucket; the shades of a room share one mesh + material (dimmed per room, lit with the room's occupancy level).
+  const pendants: { zone: ZoneId; pos: THREE.Vector3; table: Rect | null }[] = [];
+  const pendantShadeGeos = new Map<ZoneId, THREE.BufferGeometry[]>();
+  for (const { zone, table, cx, cz } of studyRooms) {
+    const geos: THREE.BufferGeometry[] = [];
+    for (const dx of [0, -SIDE_PENDANT_DX, SIDE_PENDANT_DX]) {
+      const x = cx + dx, main = dx === 0, y = main ? PENDANT_Y : SIDE_PENDANT_Y;
+      put(zone, 'metal', new THREE.CylinderGeometry(0.008, 0.008, WALL_H - y, 6), x, (WALL_H + y) / 2, cz);
+      const shade = main ? new THREE.CylinderGeometry(0.07, 0.3, 0.22, 24, 1, true) : new THREE.CylinderGeometry(0.05, 0.2, 0.16, 20, 1, true);
+      shade.translate(x, y - (main ? 0.11 : 0.08), cz);
+      geos.push(shade);
+      pendants.push({ zone, pos: new THREE.Vector3(x, y - (main ? 0.25 : 0.2), cz), table: main ? table : null });
+    }
+    pendantShadeGeos.set(zone, geos);
   }
 
   // Corridor sconces: backplate + arm into the corridor metal bucket; shades merged into one emissive mesh below.
@@ -537,6 +697,102 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     shade.translate(sc.x + n * 0.18, SCONCE_Y, sc.z);
     sconceShadeGeos.push(shade);
     put('corridor', 'decor', paint(new THREE.SphereGeometry(0.05, 10, 8), 0xfff1d6), sc.x + n * 0.18, SCONCE_Y - 0.06, sc.z);
+  }
+
+  // ---------- windows (visual only: the walls stay solid colliders) ----------
+  interface WinSpec { zone: ZoneId; alongZ: boolean; face: number; n: 1 | -1; a1: number; a2: number; y0: number; y1: number; q: THREE.Quaternion }
+  const winSpecs: WinSpec[] = MAP.windows.map((w) => {
+    const alongZ = w.z2 - w.z1 >= w.x2 - w.x1;
+    const mid = alongZ ? (w.z1 + w.z2) / 2 : (w.x1 + w.x2) / 2;
+    const wall = MAP.walls.find(wl => wl.x1 < w.x2 && wl.x2 > w.x1 && wl.z1 < w.z2 && wl.z2 > w.z1
+      && (wl.z2 - wl.z1 > wl.x2 - wl.x1) === alongZ);
+    if (!wall) throw new Error('window without a wall');
+    // the wall face looking into the building
+    const [face, n]: [number, 1 | -1] = alongZ
+      ? (inside(wall.x2 + 0.05, mid) ? [wall.x2, 1] : [wall.x1, -1])
+      : (inside(mid, wall.z2 + 0.05) ? [wall.z2, 1] : [wall.z1, -1]);
+    const zone = alongZ ? zoneOf(face + n * 0.1, mid) : zoneOf(mid, face + n * 0.1);
+    const big = zone === 'lounge';
+    const rot = alongZ ? n * Math.PI / 2 : (n > 0 ? 0 : Math.PI); // a +z-facing plane turned to face into the room
+    return {
+      zone, alongZ, face, n, a1: alongZ ? w.z1 : w.x1, a2: alongZ ? w.z2 : w.x2,
+      y0: big ? 0.9 : 1.0, y1: big ? 2.6 : 2.45, q: new THREE.Quaternion().setFromAxisAngle(Y, rot),
+    };
+  });
+  /** World point on a window: `along` the wall, height y, `off` metres in front of the wall face. */
+  const winPoint = (w: WinSpec, along: number, y: number, off: number, out: THREE.Vector3) =>
+    w.alongZ ? out.set(w.face + w.n * off, y, along) : out.set(along, y, w.face + w.n * off);
+  const wp = new THREE.Vector3();
+  for (const w of winSpecs) {
+    // frame: sill, head and a mullion every ~2 m (themed 'part' colour, merged into the zone's part mesh)
+    const len = w.a2 - w.a1, h = w.y1 - w.y0, mid = (w.a1 + w.a2) / 2;
+    const fb = (sn: number, sy: number, sa: number, off: number, y: number, a: number) => {
+      winPoint(w, a, y, off, wp);
+      if (w.alongZ) box(w.zone, 'part', sn, sy, sa, wp.x, y, wp.z);
+      else box(w.zone, 'part', sa, sy, sn, wp.x, y, wp.z);
+    };
+    fb(0.08, 0.08, len + 0.16, 0.04, w.y0 - 0.04, mid);
+    fb(0.08, 0.08, len + 0.16, 0.04, w.y1 + 0.04, mid);
+    const segs = Math.max(1, Math.round(len / 2));
+    for (let k = 0; k <= segs; k++) fb(0.06, h, 0.06, 0.03, (w.y0 + w.y1) / 2, w.a1 + (k * len) / segs);
+  }
+
+  /** Per zone with windows: one sky mesh, one rain InstancedMesh and a moon in its first window. */
+  function buildWindowMeshes() {
+    const one = new THREE.Vector3(1, 1, 1);
+    return ZONES.flatMap((zone) => {
+      const ws = winSpecs.filter(w => w.zone === zone);
+      if (!ws.length) return [];
+      const skyMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const sky = new THREE.Mesh(mergeGeometries(ws.map((w) => {
+        winPoint(w, (w.a1 + w.a2) / 2, (w.y0 + w.y1) / 2, 0.004, wp);
+        return new THREE.PlaneGeometry(w.a2 - w.a1, w.y1 - w.y0).applyQuaternion(w.q).translate(wp.x, wp.y, wp.z);
+      })), skyMat);
+      sky.name = `window:${zone}`;
+      root.add(sky);
+      dim.register(zone, skyMat);
+      const drops = ws.flatMap(w => Array.from({ length: Math.round(RAIN_PER_M * (w.a2 - w.a1)) }, () => ({
+        w,
+        a: w.a1 + 0.05 + Math.random() * (w.a2 - w.a1 - 0.1),
+        y: w.y0 + 0.11 + Math.random() * (w.y1 - w.y0 - 0.22),
+        v: 1.2 + Math.random() * 1.2, // m/s
+      })));
+      const dropMat = new THREE.MeshBasicMaterial({ color: 0x8fa8ff, transparent: true, opacity: 0, depthWrite: false });
+      const rain = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.015, 0.22), dropMat, drops.length);
+      rain.name = `rain:${zone}`;
+      rain.frustumCulled = false;
+      root.add(rain);
+      dim.register(zone, dropMat);
+      const dm = new THREE.Matrix4(), dp = new THREE.Vector3();
+      const writeDrops = () => {
+        for (let i = 0; i < drops.length; i++) {
+          const d = drops[i];
+          rain.setMatrixAt(i, dm.compose(winPoint(d.w, d.a, d.y, 0.008, dp), d.w.q, one));
+        }
+        rain.instanceMatrix.needsUpdate = true;
+      };
+      writeDrops();
+      const w0 = ws[0], len0 = w0.a2 - w0.a1, big = zone === 'lounge';
+      const moonMat = new THREE.MeshBasicMaterial({ color: 0xe8ecff, transparent: true, opacity: 0 });
+      const moon = new THREE.Mesh(new THREE.CircleGeometry(big ? 0.22 : 0.16, 24), moonMat);
+      moon.quaternion.copy(w0.q);
+      winPoint(w0, w0.a2 - Math.min(3.2, 0.3 * len0), w0.y1 - (big ? 0.4 : 0.35), 0.006, moon.position);
+      moon.name = `moon:${zone}`;
+      root.add(moon);
+      dim.register(zone, moonMat);
+      const top = (d: (typeof drops)[number]) => d.w.y1 - 0.11, bottom = (d: (typeof drops)[number]) => d.w.y0 + 0.11;
+      return [{
+        dropMat, moonMat, rain, moon, skyMat,
+        step(dtMs: number) {
+          for (let i = 0; i < drops.length; i++) {
+            const d = drops[i];
+            d.y -= (d.v * dtMs) / 1000;
+            if (d.y < bottom(d)) d.y = top(d);
+          }
+          writeDrops();
+        },
+      }];
+    });
   }
 
   // ---------- materials + merged meshes ----------
@@ -595,14 +851,26 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
   loungeShades.name = 'loungeLampShades';
   root.add(loungeShades);
   dim.register('lounge', loungeShadeMat);
-  const pendantMats = pendants.map(pd => {
+  const pendantMats = [...pendantShadeGeos].map(([zone, geos]) => {
     const mat = new THREE.MeshLambertMaterial({ color: LOUNGE_SHADE, side: THREE.DoubleSide });
-    const shade = new THREE.Mesh(pd.shade, mat);
-    shade.name = `pendant:${pd.zone}`;
+    const shade = new THREE.Mesh(mergeGeometries(geos), mat);
+    geos.forEach(g => g.dispose());
+    shade.name = `pendant:${zone}`;
     root.add(shade);
-    dim.register(pd.zone, mat);
-    return mat;
+    dim.register(zone, mat);
+    return { mat, zi: ZONES.indexOf(zone) };
   });
+  // Study-room monitor screens: a static "slide", bright while the room is lit, standby-dark otherwise.
+  const slide = slideTexture();
+  const monitorMats = screens.map(({ zone, geo }) => {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, map: slide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = `monitor:${zone}`;
+    root.add(mesh);
+    dim.register(zone, mat);
+    return { mat, zi: ZONES.indexOf(zone), shown: -1 };
+  });
+  const screenColor = new THREE.Color();
   const sconceShadeMat = new THREE.MeshLambertMaterial({ color: LOUNGE_SHADE, side: THREE.DoubleSide });
   const sconceShades = new THREE.Mesh(mergeGeometries(sconceShadeGeos), sconceShadeMat);
   sconceShadeGeos.forEach(g => g.dispose());
@@ -644,9 +912,11 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     ]);
   });
   for (const pd of pendants) {
-    addLamp('pendant', pd.zone, pd.pos, { distance: PENDANT_DIST, decay: PENDANT_DECAY }, [
+    addLamp('pendant', pd.zone, pd.pos, { distance: PENDANT_DIST, decay: PENDANT_DECAY }, pd.table ? [
       { g: GLOW.pendantTop, clip: pd.table, y: DESK_TOP + GLOW_LIFT, surface: 'desk' },
       { g: GLOW.pendantFloor, clip: MAP.zones[pd.zone], y: GLOW_FLOOR_Y, surface: FLOOR(pd.zone) },
+    ] : [
+      { g: GLOW.pendantSide, clip: MAP.zones[pd.zone], y: GLOW_FLOOR_Y, surface: FLOOR(pd.zone) },
     ]);
   }
   // Corridor sconces: glow only (floor pool + wash on the wall segment behind), all at one corridor-wide level.
@@ -671,65 +941,28 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
   });
   const CORRIDOR_ZI = ZONES.indexOf('corridor');
   const zoneLevel = new Float64Array(ZONES.length), zoneLamps = new Float64Array(ZONES.length);
+  const roomLevel = new Float64Array(ZONES.length); // study-room occupancy light level (eased), per zone
+  // Study rooms' themed colours follow their light level at night (STUDY_NIGHT_KEEP); -1 = not a study room, else the
+  // level they were last painted for.
+  const studyPainted = new Float64Array(ZONES.length).fill(-1);
+  for (const r of studyRooms) studyPainted[ZONES.indexOf(r.zone)] = 0;
+  let theme: Theme = DAY;
+  function paintStudyRoom(zi: number): void {
+    const zone = ZONES[zi], level = roomLevel[zi];
+    studyPainted[zi] = level;
+    const c = level > 0 && theme.rain > 0 ? lerpTheme(theme, DAY, STUDY_NIGHT_KEEP * theme.rain * level) : theme;
+    for (const { m, zone: z, role } of themedMats) {
+      if (z !== zone) continue;
+      dim.setBase(m, c[role], role === 'floor' ? FLOOR_TINT[zone] : role === 'wall' ? WALL_TINT[zone] : 1);
+    }
+    glow.setSurface(FLOOR(zone), c.floor, FLOOR_TINT[zone]);
+  }
   for (const l of lamps) zoneLamps[l.zi]++;
   const lampColor = new THREE.Color();
   const corridorFloor = new THREE.Color(), nightFloor = new THREE.Color();
 
-  // ---------- lounge window (aligned to the inner face of the x=0 wall) with rain + moon ----------
-  const win = MAP.windows[0];
-  const wallInner = MAP.walls.reduce((acc, w) => (w.x1 < 0 && w.x2 > 0 && w.z1 <= win.z1 && w.z2 >= win.z2 ? w.x2 : acc), 0.1);
-  const wx = wallInner + 0.004, wz = (win.z1 + win.z2) / 2, wLen = win.z2 - win.z1;
-  const wy0 = 0.9, wy1 = 2.6, wH = wy1 - wy0, wy = (wy0 + wy1) / 2;
-  const winZone = zoneOf(wx + 0.1, wz);
-  const winMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const winMesh = new THREE.Mesh(new THREE.PlaneGeometry(wLen, wH), winMat);
-  winMesh.rotation.y = Math.PI / 2; // faces +x, into the lounge
-  winMesh.position.set(wx, wy, wz);
-  winMesh.name = 'window';
-  root.add(winMesh);
-  dim.register(winZone, winMat);
-  // window frame: sill, head and a mullion every 2 m (themed 'part' colour)
-  const frameGeos: THREE.BufferGeometry[] = [];
-  const fbox = (sx: number, sy: number, sz: number, x: number, y: number, z: number) => {
-    const g = new THREE.BoxGeometry(sx, sy, sz);
-    g.translate(x, y, z);
-    frameGeos.push(g);
-  };
-  fbox(0.08, 0.08, wLen + 0.16, wallInner + 0.04, wy0 - 0.04, wz);
-  fbox(0.08, 0.08, wLen + 0.16, wallInner + 0.04, wy1 + 0.04, wz);
-  for (let z = win.z1; z <= win.z2 + 1e-6; z += 2) fbox(0.06, wH, 0.06, wallInner + 0.03, wy, z);
-  const frameMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  const frame = new THREE.Mesh(mergeGeometries(frameGeos), frameMat);
-  frameGeos.forEach(g => g.dispose());
-  frame.castShadow = frame.receiveShadow = true;
-  root.add(frame);
-  dim.register(winZone, frameMat);
-
-  const dropMat = new THREE.MeshBasicMaterial({ color: 0x8fa8ff, transparent: true, opacity: 0, depthWrite: false });
-  const dropGeo = new THREE.PlaneGeometry(0.015, 0.22);
-  dropGeo.rotateY(Math.PI / 2);
-  const rain = new THREE.InstancedMesh(dropGeo, dropMat, RAIN_DROPS);
-  rain.name = 'rain';
-  const drops = Array.from({ length: RAIN_DROPS }, () => ({
-    z: win.z1 + 0.05 + Math.random() * (wLen - 0.1),
-    y: wy0 + 0.11 + Math.random() * (wH - 0.22),
-    v: 1.2 + Math.random() * 1.2, // m/s
-  }));
-  const dm = new THREE.Matrix4();
-  const writeDrops = () => {
-    for (let i = 0; i < drops.length; i++) rain.setMatrixAt(i, dm.makeTranslation(wx + 0.004, drops[i].y, drops[i].z));
-    rain.instanceMatrix.needsUpdate = true;
-  };
-  writeDrops();
-  rain.frustumCulled = false;
-  root.add(rain);
-  const moonMat = new THREE.MeshBasicMaterial({ color: 0xe8ecff, transparent: true, opacity: 0 });
-  const moon = new THREE.Mesh(new THREE.CircleGeometry(0.22, 24), moonMat);
-  moon.rotation.y = Math.PI / 2;
-  moon.position.set(wx + 0.002, wy1 - 0.4, win.z2 - 3.2);
-  root.add(moon);
-  dim.register(winZone, dropMat);
-  dim.register(winZone, moonMat);
+  // ---------- windows: sky (MeshBasic, theme `win`), night rain and a moon (one per room), dimmed with the zone ----------
+  const winGroups = buildWindowMeshes();
   let rainLevel = 0;
   let lampI = 0;
   let night = 0; // 0 by day, 1 by night; follows the theme blend (NIGHT is the only theme with rain)
@@ -741,22 +974,30 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
     const fr = dim.factor('reading'), fl = dim.factor('lounge');
     shadeMat.emissiveIntensity = Math.min(lampI, 1) * 0.9 * fr;
     loungeShadeMat.emissiveIntensity = night * 0.9 * fl;
-    for (let i = 0; i < pendants.length; i++) pendantMats[i].emissiveIntensity = night * 0.9 * dim.factor(pendants[i].zone);
+    for (const p of pendantMats) p.mat.emissiveIntensity = roomLevel[p.zi] * 0.9 * dim.factor(ZONES[p.zi]);
+    for (const s of monitorMats) {
+      const b = SCREEN_STANDBY + (1 - SCREEN_STANDBY) * roomLevel[s.zi];
+      if (Math.abs(b - s.shown) < 1e-3) continue;
+      s.shown = b;
+      dim.setBase(s.mat, screenColor.setScalar(b));
+    }
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i];
-      const level = l.kind === 'desk' ? lampI : l.kind === 'lounge' ? LOUNGE_LIGHT_I * night : PENDANT_I * night;
+      const level = l.kind === 'desk' ? lampI : l.kind === 'lounge' ? LOUNGE_LIGHT_I * night : PENDANT_I * roomLevel[l.zi];
       sources[i].intensity = level * dim.factor(l.zone);
     }
     pool.update(sources, focusX, focusZ, dtMs);
     zoneLevel.fill(0);
     const glowScale = night + (1 - night) * GLOW_DAY;
+    const pendantGlowScale = night + (1 - night) * PENDANT_GLOW_DAY;
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i];
       const level = sources[i].intensity / FULL[l.kind];
       const unpooled = level * (1 - pool.share(i, sources));
       zoneLevel[l.zi] += unpooled / zoneLamps[l.zi];
       // × dim factor once more: the real light's contribution also scaled with the dimmed surface colour
-      const g = unpooled * dim.factor(l.zone) * glowScale, sheen = level * SHEEN[l.kind] * glowScale;
+      const gs = l.kind === 'pendant' ? pendantGlowScale : glowScale;
+      const g = unpooled * dim.factor(l.zone) * gs, sheen = level * SHEEN[l.kind] * gs;
       for (let j = 0; j < l.glows.length; j++) glow.set(l.glows[j].id, l.glows[j].g.k * g, l.glows[j].g.k * sheen);
     }
     // corridor sconces: one level for all (theme × corridor dim), never pooled
@@ -784,47 +1025,53 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
       const lit = lerpTheme(t, DAY, CORRIDOR_NIGHT_KEEP * t.rain);
       corridorFloor.setHex(lerpHex(t.floor, CORRIDOR_SAND, CORRIDOR_SAND_MIX))
         .lerp(nightFloor.setHex(lit.floor).multiplyScalar(CORRIDOR_NIGHT_FLOOR), t.rain);
+      theme = t;
       for (const { m, zone, role } of themedMats) {
         if (zone === 'corridor' && role === 'floor') { dim.setBase(m, corridorFloor); continue; }
+        if (studyPainted[ZONES.indexOf(zone)] >= 0) continue; // study rooms: paintStudyRoom below
         const c = zone === 'corridor' ? lit : t;
         dim.setBase(m, c[role], role === 'floor' ? FLOOR_TINT[zone] : role === 'wall' ? WALL_TINT[zone] : 1);
       }
+      for (let zi = 0; zi < ZONES.length; zi++) if (studyPainted[zi] >= 0) paintStudyRoom(zi);
       sconceShadeMat.emissive.setHex(t.lamp);
       glow.setSurface('wall:corridor', lit.wall, WALL_TINT.corridor);
-      dim.setBase(frameMat, t.part);
-      dim.setBase(winMat, t.win);
+      for (const g of winGroups) dim.setBase(g.skyMat, t.win);
       dim.setBase(shadeMat, t.lamp);
       shadeMat.emissive.setHex(t.lamp);
       loungeShadeMat.emissive.setHex(t.lamp);
-      for (const mat of pendantMats) mat.emissive.setHex(t.lamp);
+      for (const p of pendantMats) p.mat.emissive.setHex(t.lamp);
       pool.setColor(t.lamp);
       glow.setColor(t.lamp);
       lampColor.setHex(t.lamp);
       glow.setSurface('desk', t.desk);
       for (const z of ZONES) {
         if (z === 'corridor') glow.setSurface(FLOOR(z), corridorFloor.getHex());
-        else glow.setSurface(FLOOR(z), t.floor, FLOOR_TINT[z]);
+        else if (studyPainted[ZONES.indexOf(z)] < 0) glow.setSurface(FLOOR(z), t.floor, FLOOR_TINT[z]);
       }
       lampI = t.lampI;
       night = t.rain;
       applyLampLevels(0);
       rainLevel = t.rain;
-      dropMat.opacity = 0.55 * t.rain;
-      moonMat.opacity = t.rain;
-      rain.visible = moon.visible = t.rain > 0.01;
+      for (const g of winGroups) {
+        g.dropMat.opacity = 0.55 * t.rain;
+        g.moonMat.opacity = t.rain;
+        g.rain.visible = g.moon.visible = t.rain > 0.01;
+      }
     },
-    update(dtMs: number, focus: { x: number; z: number }) {
+    update(dtMs: number, focus: { x: number; z: number }, rooms?: RoomLevels) {
       focusX = focus.x;
       focusZ = focus.z;
+      for (let zi = 0; zi < ZONES.length; zi++) {
+        const l = Math.min(1, Math.max(0, rooms ? rooms.level(ZONES[zi]) : 0));
+        roomLevel[zi] = l * l * (3 - 2 * l); // smoothstep: the linear fade eased in and out
+      }
+      for (let zi = 0; zi < ZONES.length; zi++) {
+        const p = studyPainted[zi];
+        if (p >= 0 && Math.abs(roomLevel[zi] - p) > 0.004) paintStudyRoom(zi);
+      }
       applyLampLevels(dtMs);
       if (rainLevel <= 0.01) return;
-      const top = wy1 - 0.11, bottom = wy0 + 0.11;
-      for (let i = 0; i < drops.length; i++) {
-        const d = drops[i];
-        d.y -= (d.v * dtMs) / 1000;
-        if (d.y < bottom) d.y = top;
-      }
-      writeDrops();
+      for (const g of winGroups) g.step(dtMs);
     },
   };
 }

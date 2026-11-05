@@ -11,7 +11,8 @@ export interface Interactable { id: InteractableId; x: number; z: number }
 export interface Wall extends Rect { glass: boolean }
 export interface Prop extends Rect {
   kind: 'desk' | 'table' | 'counter' | 'vending' | 'sofa' | 'beanbag' | 'board' | 'plant'
-    | 'bookshelf' | 'coffeeTable' | 'windowBar' | 'bigPlant' | 'armchair';
+    | 'bookshelf' | 'coffeeTable' | 'windowBar' | 'bigPlant' | 'armchair'
+    | 'cabinet' | 'coatRack';
 }
 
 const T = 0.1; // half wall thickness (thickness 0.2)
@@ -111,6 +112,21 @@ props.push(
   rect('armchair', 4.3, 22.4, 5.2, 23.3),     // reading nook by the radio (decor, not a seat)
 );
 
+// Study-room furniture (v1.2). Both rooms share a plan: a low bookshelf and a low cabinet against the north wall (on
+// opposite ends in A and B), a coat rack in the corner beside the door, a big plant by the east window. The whiteboard
+// (north wall), the wall-mounted monitor (south wall), the clock and the rug are client-only. Everything sits clear of
+// the door, the lane down the room's middle and the chairs (see map.test.ts).
+for (const [zone, z0, flip] of [['studyA', 14, false], ['studyB', 19, true]] as const) {
+  const north = z0 + 0.1; // inner face of the room's north wall
+  const [shelfX, cabX] = flip ? [30.4, 18.8] : [18.6, 30.4];
+  props.push(
+    rect('bookshelf', shelfX, north, shelfX + 2.0, north + 0.4),
+    rect('cabinet', cabX, north, cabX + 1.8, north + 0.45),
+    box('coatRack', 16.55, north + 0.45, 0.5, 0.5),
+    box('bigPlant', 35.35, zone === 'studyA' ? z0 + 4.35 : z0 + 0.65, 0.8, 0.8),
+  );
+}
+
 export const MAP: {
   width: 36; depth: 24; wallHeight: 3; zones: Record<ZoneId, Rect>;
   walls: Wall[]; props: Prop[]; seats: Seat[]; interactables: Interactable[];
@@ -118,7 +134,12 @@ export const MAP: {
 } = {
   width: 36, depth: 24, wallHeight: 3,
   zones, walls, props, seats, interactables,
-  windows: [{ x1: 0, z1: 4, x2: 0.2, z2: 20 }], // big lounge window in the back wall x=0
+  windows: [
+    { x1: 0, z1: 4, x2: 0.2, z2: 20 },        // big lounge window in the back wall x=0
+    { x1: 35.8, z1: 14.7, x2: 36, z2: 18.3 },  // study room A, east wall
+    { x1: 35.8, z1: 19.7, x2: 36, z2: 23.3 },  // study room B, east wall
+    { x1: 30.4, z1: 23.8, x2: 34.0, z2: 24 },  // study room B, south (entrance-side) wall
+  ], // visual only: the walls stay solid colliders
   spawn: { x: 14.5, z: 23, facing: Math.PI },
 };
 

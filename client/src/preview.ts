@@ -11,11 +11,13 @@ import { LabelSprite, labelText } from './three/label';
 import { InputState } from './game/input';
 import { stepMovement, walkBlocked } from './game/controller';
 import { CameraRig, forwardWeight } from './game/camera';
+import { RoomLights } from './game/roomLights';
 
 const view = document.getElementById('view')!;
 const help = document.getElementById('help')!;
 const ctx = createScene(view);
 const dimmer = new ZoneDimmer();
+const rooms = new RoomLights(); // study-room lights follow everyone in the preview, "me" included
 const building = buildBuilding(ctx.scene, dimmer);
 const blender = new ThemeBlender(DAY);
 const applyTheme = () => {
@@ -97,7 +99,7 @@ ctx.renderer.domElement.addEventListener('wheel', e => { dist = Math.min(60, Mat
 
 // ---------- "me" camera rig (F toggles, C seats) ----------
 const rig = new CameraRig(ctx.camera, ctx.renderer.domElement);
-(window as unknown as { __preview: unknown }).__preview = { rig, walker }; // dev-only page: handle for manual/automated checks
+(window as unknown as { __preview: unknown }).__preview = { rig, walker, rooms }; // dev-only page: handle for manual/automated checks
 let seated: Seat | null = null;
 const myPos = new THREE.Vector3();
 let occluderList: THREE.Object3D[] | null = null; // built once (the scene's top level doesn't change after setup)
@@ -153,8 +155,10 @@ ctx.onFrame((dtMs) => {
   elapsed += dtMs / 1000;
   if (blender.update(dtMs)) applyTheme();
   dimmer.update(dtMs);
+  for (const a of actors) rooms.mark(a.rig.root.position.x, a.rig.root.position.z);
+  rooms.update(dtMs);
   // the light pool follows "me" in the F view, else the orbit camera's target
-  building.update(dtMs, follow ? walker.rig.root.position : target);
+  building.update(dtMs, follow ? walker.rig.root.position : target, rooms);
 
   const serverNow = Date.now();
   for (const a of actors) {

@@ -26,3 +26,16 @@ describe('RemotePlayers.views', () => {
     r.clear();
   });
 });
+
+describe('RemotePlayers.forEachPosition', () => {
+  test('reports every drawn avatar, seated ones at their seat (feeds study-room occupancy)', () => {
+    const r = new RemotePlayers(new THREE.Scene());
+    r.upsert(pv('walker', { x: 20, z: 16 }));
+    r.upsert(pv('npc', { isNpc: true, seatId: 'B2', x: 0, z: 0 }));
+    r.update(16, 0, () => 1);
+    const seen: [number, number][] = [];
+    r.forEachPosition((x, z) => seen.push([x, z]));
+    expect(seen).toEqual([[20, 16], [26, 20.45]]); // B2: x 26, z 21.5 − 1.05
+    r.clear();
+  });
+});

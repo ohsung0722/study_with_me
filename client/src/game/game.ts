@@ -87,14 +87,15 @@ export class Game {
     return zn ? this.dimmer.factor(zn) : 1;
   };
 
-  constructor(root: HTMLElement, private conn: GameConnection, join: JoinOk, profile: Profile) {
+  /** `refreshMs`: display refresh measured before the 3D loop (measureRefresh); 0 = unknown. */
+  constructor(root: HTMLElement, private conn: GameConnection, join: JoinOk, profile: Profile, refreshMs = 0) {
     this.profile = { ...profile };
     root.replaceChildren();
     this.view = document.createElement('div');
     this.view.className = 'game-view';
     root.appendChild(this.view);
 
-    this.ctx = createScene(this.view);
+    this.ctx = createScene(this.view, { refreshMs });
     this.building = buildBuilding(this.ctx.scene, this.dimmer);
     this.ctx.scene.getObjectByName('building')?.children.forEach((o) => {
       if ((o as THREE.Mesh).isMesh && OCCLUDER_ROLES.has(o.name.split(':')[1])) this.occluders.push(o);

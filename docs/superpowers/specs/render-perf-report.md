@@ -191,3 +191,15 @@ npm run build  → tsc shared/server/client clean; vite: ✓ 81 modules transfor
 **Remaining trade-offs:**
 - rAF timing alone can't tell a 30–34 Hz display from a 60 Hz GPU that consistently needs exactly 2 vsyncs per frame. In the second case the controller now holds instead of stepping down. The p10 estimator still finds 16.7 ms whenever ≥ 10 % of ticks land on a single vsync, so only perfectly steady 2-vsync rendering is affected.
 - Still allocating per frame: `pickPrompt`'s `filter`s / `Set` and `Map` iterators in `RemotePlayers`.
+
+### Fix round 1b: pre-measured refresh reference
+
+This resolves the concern above. A weak integrated GPU at 30 fps on a 60 Hz panel must step down, not hold.
+
+- **Measurement.** `frameCap.ts` adds `measureRefresh(800)`, which samples rAF intervals while no WebGL work runs. `main.ts` starts it as soon as the entry screen shows. The intervals are reduced by the pure `refreshFromIntervals`: 10th percentile, ignoring gaps ≤ 0 or > 250 ms, and 0 if fewer than 10 samples. If rAF never ticks (hidden tab), it resolves 0 after 1.3 s.
+- **Wiring.** `Game` passes the value to `createScene(view, { refreshMs })`. The loop's reference is `refreshReference(premeasured, inLoop)`: the pre-measured value, which the in-loop estimate may only lower. The in-loop `RefreshEstimator` stands in only when nothing was measured, e.g. `preview.html`.
+- **Tests (+5):**
+  - `frameCap.test.ts`: the reducer (60 Hz with outliers and stalls, 30 Hz, too few samples); `measureRefresh` with a fake rAF, and resolving 0 when rAF never fires; `refreshReference`.
+  - `quality.test.ts`: a 60 Hz reference with 33 ms ticks steps down; a 30 Hz reference with 33 ms ticks holds.
+- **Commands:** `npm test` → 46 files, 314 tests passed, no warnings. `npm run build` → clean (✓ built in 160ms).
+- **Remaining limit.** If the entry-screen measurement fails (hidden tab), the in-loop fallback has the old ambiguity.

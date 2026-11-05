@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { MAP } from '@studyverse/shared';
 import type { Theme } from './theme';
-import { FrameGate, RefreshEstimator } from './frameCap';
+import { FrameGate, RefreshEstimator, refreshReference } from './frameCap';
 import { initialQuality, qualitySample, type Tier } from './quality';
 import { StatsOverlay, renderFps, statsEnabled } from '../ui/stats';
 
@@ -43,7 +43,16 @@ export function dropShadows(shadowMap: { enabled: boolean }, key: THREE.Directio
   });
 }
 
-export function createScene(container: HTMLElement): SceneCtx {
+export interface SceneOptions {
+  /**
+   * Display refresh interval measured before any WebGL work (measureRefresh); the quality controller's fixed
+   * reference. 0/absent (e.g. preview.html): the in-loop estimate stands in.
+   */
+  refreshMs?: number;
+}
+
+export function createScene(container: HTMLElement, opts: SceneOptions = {}): SceneCtx {
+  const premeasuredRefresh = opts.refreshMs ?? 0;
   const dpr = window.devicePixelRatio || 1;
   const quality = initialQuality(dpr);
   // MSAA only where pixels are big enough for jaggies to show; high-res screens get the resolution instead.
@@ -131,7 +140,7 @@ export function createScene(container: HTMLElement): SceneCtx {
       statWorkSum += sample;
       statWorkN++;
       if (!document.hidden) {
-        const change = qualitySample(quality, sample, refresh.value());
+        const change = qualitySample(quality, sample, refreshReference(premeasuredRefresh, refresh.value()));
         if (change === 'ratio') renderer.setPixelRatio(quality.ratio);
         else if (change === 'tier') applyTier(quality.tier);
       }

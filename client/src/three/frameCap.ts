@@ -58,3 +58,51 @@ export class RefreshEstimator {
     return this.est;
   }
 }
+
+// ---------- pre-measured display refresh ----------
+// The in-loop estimate can't tell a slow display from a GPU-bound one (both give long rAF intervals). So the display
+// refresh is measured once while nothing heavy renders (during the entry screen, before any WebGL work) and used
+// as the quality controller's fixed reference; the in-loop estimate may only lower it.
+const MIN_REFRESH_SAMPLES = 10;
+const MAX_REFRESH_SAMPLE_MS = 250; // longer gaps are stalls (hidden tab, GC), not a refresh rate
+
+/** Robust refresh interval from idle rAF intervals: 10th percentile of the plausible ones; 0 if too few. */
+export function refreshFromIntervals(intervals: readonly number[]): number {
+  const ok = intervals.filter((v) => v > 0 && v <= MAX_REFRESH_SAMPLE_MS);
+  if (ok.length < MIN_REFRESH_SAMPLES) return 0;
+  ok.sort((a, b) => a - b);
+  return ok[Math.floor(ok.length * REFRESH_PERCENTILE)];
+}
+
+/**
+ * Sample requestAnimationFrame intervals for about `ms` and reduce them with refreshFromIntervals. Run it while
+ * nothing heavy renders. Resolves 0 (unknown) if rAF doesn't tick (hidden tab) within ms + 500.
+ */
+export function measureRefresh(ms = 800, raf: (cb: (now: number) => void) => unknown = requestAnimationFrame): Promise<number> {
+  return new Promise((resolve) => {
+    const intervals: number[] = [];
+    let first = -1, prev = -1, done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(guard);
+      resolve(refreshFromIntervals(intervals));
+    };
+    const guard = setTimeout(finish, ms + 500);
+    const tick = (now: number) => {
+      if (done) return;
+      if (prev >= 0) intervals.push(now - prev);
+      else first = now;
+      prev = now;
+      if (now - first >= ms) finish();
+      else raf(tick);
+    };
+    raf(tick);
+  });
+}
+
+/** Quality controller reference: the pre-measured refresh; the in-loop estimate may only lower it or stand in for it. */
+export function refreshReference(premeasuredMs: number, inLoopMs: number): number {
+  if (premeasuredMs > 0) return inLoopMs > 0 ? Math.min(premeasuredMs, inLoopMs) : premeasuredMs;
+  return inLoopMs;
+}

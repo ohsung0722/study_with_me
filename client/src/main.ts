@@ -6,6 +6,7 @@ import { loadProfile, saveProfile } from './profile';
 import { isPcLike, showPcOnly } from './ui/pcOnly';
 import { showEntry } from './ui/entry';
 import { Game } from './game/game';
+import { measureRefresh } from './three/frameCap';
 
 const root = document.getElementById('app')!;
 
@@ -23,6 +24,9 @@ async function start(): Promise<void> {
     showPcOnly(root);
     return;
   }
+  // Measure the display refresh now, while only the entry screen (no WebGL) is up: the quality controller's
+  // reference, so a GPU-bound 30 fps on a 60 Hz panel reads as overload, not as a 30 Hz display.
+  const refreshP = measureRefresh(800);
   const profile: Profile = await showEntry(root, loadProfile(localStorage));
   saveProfile(localStorage, profile);
 
@@ -45,7 +49,7 @@ async function start(): Promise<void> {
     overlay('사용할 수 없는 닉네임이에요. 새로고침해 주세요');
     return;
   }
-  new Game(root, conn, r, profile);
+  new Game(root, conn, r, profile, await refreshP);
 }
 
 void start();

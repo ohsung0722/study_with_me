@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'vitest';
-import { FrameGate, RefreshEstimator } from '../src/three/frameCap';
+import { describe, expect, test, vi } from 'vitest';
+import { FrameGate, RefreshEstimator, measureRefresh, refreshFromIntervals, refreshReference } from '../src/three/frameCap';
 
 /** rAF ticks at `hz` for `ms` (optionally jittered); returns the timestamps that rendered. */
 function ticks(gate: FrameGate, hz: number, ms: number, jitter = (_i: number) => 0): number[] {
@@ -84,5 +84,36 @@ describe('RefreshEstimator', () => {
     r.observe(-5);
     r.observe(NaN);
     expect(r.value()).toBe(0);
+  });
+});
+
+describe('pre-measured display refresh (before any WebGL work)', () => {
+  test('refreshFromIntervals: robust low percentile; ignores stalls and nonsense; 0 with too few samples', () => {
+    const at60 = Array.from({ length: 48 }, (_, i) => 16.7 + (i % 4) * 0.1);
+    expect(refreshFromIntervals(at60)).toBeCloseTo(16.7, 1);
+    expect(refreshFromIntervals([...at60, 2, 400, NaN, -3, 0])).toBeCloseTo(16.7, 1);
+    expect(refreshFromIntervals(Array.from({ length: 24 }, () => 33.3))).toBeCloseTo(33.3);
+    expect(refreshFromIntervals([16.7, 16.7, 16.7])).toBe(0);
+  });
+
+  test('measureRefresh samples rAF for ~the given time, then reduces', async () => {
+    let t = 0;
+    const raf = (cb: (now: number) => void) => { t += 16.7; queueMicrotask(() => cb(t)); return 0; };
+    expect(await measureRefresh(800, raf)).toBeCloseTo(16.7);
+  });
+
+  test('measureRefresh resolves 0 if rAF never fires (hidden tab)', async () => {
+    vi.useFakeTimers();
+    const p = measureRefresh(800, () => 0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await p).toBe(0);
+    vi.useRealTimers();
+  });
+
+  test('refreshReference: the pre-measured value wins; the in-loop estimate may only lower it, or stand in when absent', () => {
+    expect(refreshReference(16.7, 33.3)).toBe(16.7); // GPU-bound 30 fps on a 60 Hz panel: still a 60 Hz reference
+    expect(refreshReference(16.7, 6.1)).toBe(6.1);
+    expect(refreshReference(0, 33.3)).toBe(33.3);   // preview.html: in-loop fallback
+    expect(refreshReference(0, 0)).toBe(0);
   });
 });

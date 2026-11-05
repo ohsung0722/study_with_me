@@ -131,6 +131,13 @@ describe('qualitySample (the scene loop wiring: thresholds relative to the displ
     }
   });
 
+  test('weak GPU at 30 fps on a 60 Hz panel (60 Hz reference, 33 ms ticks) steps down; a 30 Hz display holds', () => {
+    const weak = initialQuality(2);
+    expect(run(weak, 33.3, 16.7, WINDOW_MS + 34)).toEqual(['ratio']);
+    const slowPanel = initialQuality(2);
+    expect(run(slowPanel, 33.3, 33.3, 60_000)).toEqual([]);
+  });
+
   test('40 ms samples on a 60 Hz display (16.7 ms refresh) still step down', () => {
     const q = initialQuality(2);
     expect(run(q, 40, 16.7, WINDOW_MS + 40)).toEqual(['ratio']);

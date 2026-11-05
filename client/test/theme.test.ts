@@ -16,6 +16,14 @@ describe('theme', () => {
     }
   });
 
+  test('lerpTheme can write into a reused scratch theme (no allocation during fades)', () => {
+    const scratch = { ...DAY };
+    const r = lerpTheme(DAY, NIGHT, 0.3, scratch);
+    expect(r).toBe(scratch);
+    expect(r).toEqual(lerpTheme(DAY, NIGHT, 0.3));
+    expect(lerpTheme(DAY, NIGHT, 1, scratch)).toEqual(NIGHT);
+    expect(DAY.rain).toBe(0); // inputs untouched
+  });
   test('lerpTheme endpoints equal inputs', () => {
     expect(lerpTheme(DAY, NIGHT, 0)).toEqual(DAY);
     expect(lerpTheme(DAY, NIGHT, 1)).toEqual(NIGHT);

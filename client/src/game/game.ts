@@ -310,8 +310,9 @@ export class Game {
     this.myAvatar.paint(this.myView, serverNow, true, dimAt(this.me.x, this.me.z));
     this.myAvatar.setLabelVisible(!seat); // the seated camera sits right behind it; the HUD shows 🔒 and my time
 
-    // camera + focus vignette centred on me
+    // camera + focus vignette centred on me (steeper in the shallow study rooms so the walls don't pull it in)
     this.cam.setSeatedView(seat);
+    this.cam.updatePitchFloor(myZone, dtMs);
     this.cam.follow(this.tmp.set(this.me.x, 0, this.me.z), dtMs, this.occluders);
     const focus = isFocus(this.myView);
     this.hud.setFocus(focus);

@@ -75,3 +75,27 @@ Make them read as real group-study rooms (warm, cozy, consistent with the approv
 - Point lights still pass through walls (no light shadows). A pooled study pendant may slightly light the reading-room desks right behind the z=14 wall, the same as the v1.1 pendant.
 - The monitor shows one static slide. The clocks are decorative (10:10).
 - With the 5 m-deep rooms, the in-game follow camera pulls in close near the walls; the monitor and whiteboard are best seen from the table.
+
+### Follow-up round (after review)
+1. **Follow camera in the study rooms.**
+   - `camera.ts` adds `STUDY_PITCH_FLOOR = 0.85` and `PITCH_FLOOR_TAU_MS = 300`, plus the pure functions `pitchFloorFor(zone)` (0.85 in studyA/studyB, 0 elsewhere) and `approachPitchFloor(cur, target, dt)` (exponential).
+   - `CameraRig` gets `pitchFloor` and `updatePitchFloor(zone, dt)`. The desired position uses `max(pitch, pitchFloor)`, and the player's own pitch is left untouched.
+   - `game.ts` calls `updatePitchFloor(myZone, dt)` every frame; the preview does the same in follow mode.
+   - Preview check (night, room B, follow mode; in-page numbers, because the hidden pane rendered at only 168×95):
+     - Facing the whiteboard: camera elevation 0.835, boom 4.66 m and still easing out, whiteboard centre on-screen with a line of sight clear of the 3 m walls.
+     - Facing the monitor: elevation 0.85, full 5.0 m boom, monitor on-screen and clear.
+     - For comparison, the review measured about 2.5 m mid-room at pitch 0.5.
+2. **Pendant range:** `PENDANT_DIST` 4.5 → 3.3 and `PENDANT_I` 8 → 9.5 (+19 %); the table pendant's floor glow radius 4 → 3.4 to match.
+   - Checked with three's point-light falloff instead of by eye (the pane was too small to judge). The worst irradiance on the reading-room strip z 12–13.9, and on room B's north strip, from room A's pendants drops from 0.74 to 0.05.
+   - The floor under the chairs in the lit room stays within 6 % (2.87 → 2.71).
+3. **`paintStudyRoom`:**
+   - It now tracks the painted "lift" (`STUDY_NIGHT_KEEP × night × level`) and repaints only at night, and only when the lift has moved more than 0.002. Day → night changes still repaint through `applyTheme`.
+   - `lerpTheme(a, b, k, out?)` can write into a reused scratch theme, and the per-zone material lists are built once, so a fade allocates nothing per frame.
+4. **`RemotePlayers.forEachPosition`** uses `this.map.forEach`.
+5. **Tests:**
+   - New `client/test/cameraPitchFloor.test.ts` (5): which zones get the floor, the easing (one time constant, frame-rate independence, dt ≤ 0), the rig using `max(pitch, floor)` without touching `pitch`, and `updatePitchFloor` easing in and back out.
+   - `theme.test.ts`: the scratch `lerpTheme`.
+   - `buildingLights.test.ts`: lounge window regression (160 rain drops, moon at (0.106, 2.2, 16.8), sky plane bounds, dims with the lounge zone).
+   - The roomLights test is renamed to "outside the building (or not a number)".
+- `npm test` → `Test Files 48 passed (48)`, `Tests 360 passed (360)`, no stderr. `npm run build` clean (index 129 kB).
+- Preview vite on 5182 stopped, launch.json restored, viewport emulation reset; no console errors.

@@ -183,6 +183,7 @@ ctx.onFrame((dtMs) => {
   }
   if (follow) {
     myPos.set(walker.rig.root.position.x, 0, walker.rig.root.position.z);
+    rig.updatePitchFloor(zoneAt(myPos.x, myPos.z), dtMs);
     rig.follow(myPos, dtMs, occluders());
     return;
   }

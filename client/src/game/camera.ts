@@ -1,6 +1,6 @@
 // Third-person camera rig: drag to rotate, wheel to zoom, wall occlusion pull-in, seated view.
 import * as THREE from 'three';
-import { MAP, type Seat } from '@studyverse/shared';
+import { MAP, type Seat, type ZoneId } from '@studyverse/shared';
 
 const MIN_DIST = 2.5, MAX_DIST = 12;
 const MIN_PITCH = 0.1, MAX_PITCH = 1.3;
@@ -27,6 +27,26 @@ export function followYaw(yaw: number, facing: number, weight: number, dtMs: num
   const target = facing + Math.PI;
   const delta = Math.atan2(Math.sin(target - yaw), Math.cos(target - yaw));
   return yaw + delta * (1 - Math.exp(-dtMs / tauMs)) * Math.min(1, weight);
+}
+
+/**
+ * Minimum follow-camera pitch in the study rooms. They are only 5 m deep, so at the default pitch the view ray hits
+ * the 3 m walls and the boom pulls in to ~2.5 m (under 1 m near a wall), hiding the whiteboard and monitor. Looking
+ * down more steeply lets the ray clear the walls from anywhere more than ~1.4 m away from them.
+ */
+export const STUDY_PITCH_FLOOR = 0.85;
+/** The pitch floor eases in/out with this time constant when I walk into or out of a study room. */
+export const PITCH_FLOOR_TAU_MS = 300;
+
+/** The pitch floor for the zone I'm in: STUDY_PITCH_FLOOR in the study rooms, 0 (none) elsewhere. */
+export function pitchFloorFor(zone: ZoneId | null): number {
+  return zone === 'studyA' || zone === 'studyB' ? STUDY_PITCH_FLOOR : 0;
+}
+
+/** Ease the pitch floor toward `target` (exponential, frame-rate independent; dt ≤ 0 changes nothing). */
+export function approachPitchFloor(cur: number, target: number, dtMs: number, tauMs = PITCH_FLOOR_TAU_MS): number {
+  if (dtMs <= 0) return cur;
+  return target + (cur - target) * Math.exp(-dtMs / tauMs);
 }
 
 const PULL_IN_TAU_MS = 50;   // a wall comes between me and the camera: get in front of it quickly
@@ -65,6 +85,8 @@ export function seatedCameraPose(s: Seat): { pos: P3; look: P3 } {
 export class CameraRig {
   yaw = 0;
   pitch = 0.5;
+  /** The view never looks down less steeply than this (the player's own pitch is kept; see updatePitchFloor). */
+  pitchFloor = 0;
   dist = 5;
   private seat: Seat | null = null;
   private drag: { x: number; y: number } | null = null;
@@ -105,6 +127,11 @@ export class CameraRig {
 
   setSeatedView(seat: Seat | null): void { this.seat = seat; }
 
+  /** Ease pitchFloor toward the floor of the zone I'm in (pitchFloorFor). Call once per frame. */
+  updatePitchFloor(zone: ZoneId | null, dtMs: number): void {
+    this.pitchFloor = approachPitchFloor(this.pitchFloor, pitchFloorFor(zone), dtMs);
+  }
+
   /**
    * Swing the camera behind the character while it walks forward. Call once per frame after movement with the
    * character's facing and `forwardWeight(input axis)` (0 when not moving). Paused while seated, while dragging,
@@ -126,10 +153,11 @@ export class CameraRig {
       lookAt.set(pose.look.x, pose.look.y, pose.look.z);
     } else {
       head.set(target.x, target.y + HEAD_Y, target.z);
+      const pitch = Math.max(this.pitch, this.pitchFloor);
       desired.set(
-        head.x + Math.sin(this.yaw) * Math.cos(this.pitch) * this.dist,
-        head.y + Math.sin(this.pitch) * this.dist,
-        head.z + Math.cos(this.yaw) * Math.cos(this.pitch) * this.dist,
+        head.x + Math.sin(this.yaw) * Math.cos(pitch) * this.dist,
+        head.y + Math.sin(pitch) * this.dist,
+        head.z + Math.cos(this.yaw) * Math.cos(pitch) * this.dist,
       );
       lookAt.copy(head);
       // occlusion: keep the camera in front of the first hit between the character and the camera.

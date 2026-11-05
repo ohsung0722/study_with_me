@@ -198,4 +198,26 @@ describe('building lamps (light pool + glow)', () => {
     settle(b, dim, { x: 21, z: 16.5 }, 1000, lit('studyA'));
     expect(sky('studyB')).toBeCloseTo(full * OTHER_ZONE_BRIGHTNESS, 5);
   });
+
+  test('lounge window (regression): 160 rain drops, the moon where it was, dims with the lounge', () => {
+    const scene = new THREE.Scene();
+    const dim = new ZoneDimmer();
+    const b = buildBuilding(scene, dim);
+    expect((scene.getObjectByName('rain:lounge') as THREE.InstancedMesh).count).toBe(160);
+    const moon = scene.getObjectByName('moon:lounge')!;
+    expect(moon.position.x).toBeCloseTo(0.106, 6); // inner face of the x=0 wall (0.1) + 0.006
+    expect(moon.position.y).toBeCloseTo(2.2, 6);   // window top 2.6 − 0.4
+    expect(moon.position.z).toBeCloseTo(16.8, 6);  // window end 20 − 3.2
+    const sky = scene.getObjectByName('window:lounge') as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+    sky.geometry.computeBoundingBox();
+    const bb = sky.geometry.boundingBox!;
+    expect(bb.min.x).toBeCloseTo(0.104, 6);
+    expect([bb.min.y, bb.max.y, bb.min.z, bb.max.z]).toEqual([0.9, 2.6, 4, 20].map((v) => expect.closeTo(v, 6)));
+    b.applyTheme(NIGHT);
+    const full = sky.material.color.r;
+    expect(full).toBeGreaterThan(0);
+    dim.setZone('reading');
+    settle(b, dim, { x: 20, z: 6 }, 1000);
+    expect(sky.material.color.r).toBeCloseTo(full * OTHER_ZONE_BRIGHTNESS, 6);
+  });
 });

@@ -54,8 +54,10 @@ const LOUNGE_SHADE = 0xf3e3c3;
 const PENDANT_Y = 2.0;        // bottom of the cord / top of the shade (table pendant)
 const SIDE_PENDANT_Y = 2.25;  // the end pendants hang a little higher
 const SIDE_PENDANT_DX = 5.5;  // end pendants: this far either side of the table centre
-const PENDANT_I = 8;          // full intensity (× room light level × that room's dim factor)
-const PENDANT_DIST = 4.5;     // short range: stays inside its room (the other table is 5 m away)
+const PENDANT_I = 9.5;        // full intensity (× room light level × that room's dim factor)
+// Short range: from the pendants' line down the room's middle it reaches the room's own walls but not the floor
+// behind them (the reading-room strip z≈12–14, the neighbouring room's near strip); point lights ignore walls.
+const PENDANT_DIST = 3.3;
 // Monitor screen brightness when its room is unlit (standby: nearly black) — full when the room is lit.
 const SCREEN_STANDBY = 0.05;
 const MONITOR_Y = 1.62;       // monitor centre height
@@ -81,7 +83,7 @@ const RAIN_PER_M = 10;          // rain drops per metre of window
 const GLOW = {
   deskTop: { r: 1.5, k: 3 }, deskFloor: { r: 2.4, k: 0.9 },
   loungeTop: { r: 1, k: 3 }, loungeFloor: { r: 4, k: 2.5 },
-  pendantTop: { r: 2.6, k: 2.6 }, pendantFloor: { r: 4, k: 1.5 }, pendantSide: { r: 3.2, k: 1.4 },
+  pendantTop: { r: 2.6, k: 2.6 }, pendantFloor: { r: 3.4, k: 1.5 }, pendantSide: { r: 3.2, k: 1.4 },
   sconceFloor: { r: 2.8, k: 2.2 }, sconceWall: { r: 1.8, k: 2.0 },
 };
 const SCONCE_WALL_SHEEN = 0.08; // untinted warm wash on the wall (shows on the dark night plaster too)
@@ -942,17 +944,20 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
   const CORRIDOR_ZI = ZONES.indexOf('corridor');
   const zoneLevel = new Float64Array(ZONES.length), zoneLamps = new Float64Array(ZONES.length);
   const roomLevel = new Float64Array(ZONES.length); // study-room occupancy light level (eased), per zone
-  // Study rooms' themed colours follow their light level at night (STUDY_NIGHT_KEEP); -1 = not a study room, else the
-  // level they were last painted for.
+  // Study rooms' themed colours follow their light level at night: the "lift" toward DAY is STUDY_NIGHT_KEEP × night
+  // × level. studyPainted: -1 = not a study room, else the lift it was last painted with.
   const studyPainted = new Float64Array(ZONES.length).fill(-1);
   for (const r of studyRooms) studyPainted[ZONES.indexOf(r.zone)] = 0;
+  const studyMats = ZONES.map(z => themedMats.filter(t => t.zone === z)); // per zone, built once
+  const studyScratch: Theme = { ...DAY }; // reused by the fades (no allocation per frame)
   let theme: Theme = DAY;
+  const studyLift = (zi: number) => STUDY_NIGHT_KEEP * theme.rain * roomLevel[zi];
   function paintStudyRoom(zi: number): void {
-    const zone = ZONES[zi], level = roomLevel[zi];
-    studyPainted[zi] = level;
-    const c = level > 0 && theme.rain > 0 ? lerpTheme(theme, DAY, STUDY_NIGHT_KEEP * theme.rain * level) : theme;
-    for (const { m, zone: z, role } of themedMats) {
-      if (z !== zone) continue;
+    const zone = ZONES[zi], lift = studyLift(zi), mats = studyMats[zi];
+    studyPainted[zi] = lift;
+    const c = lift > 0 ? lerpTheme(theme, DAY, lift, studyScratch) : theme;
+    for (let i = 0; i < mats.length; i++) {
+      const { m, role } = mats[i];
       dim.setBase(m, c[role], role === 'floor' ? FLOOR_TINT[zone] : role === 'wall' ? WALL_TINT[zone] : 1);
     }
     glow.setSurface(FLOOR(zone), c.floor, FLOOR_TINT[zone]);
@@ -1065,9 +1070,12 @@ export function buildBuilding(scene: THREE.Scene, dim: ZoneDimmer): Building {
         const l = Math.min(1, Math.max(0, rooms ? rooms.level(ZONES[zi]) : 0));
         roomLevel[zi] = l * l * (3 - 2 * l); // smoothstep: the linear fade eased in and out
       }
-      for (let zi = 0; zi < ZONES.length; zi++) {
-        const p = studyPainted[zi];
-        if (p >= 0 && Math.abs(roomLevel[zi] - p) > 0.004) paintStudyRoom(zi);
+      // by day the lift is always 0 (applyTheme painted it); at night only repaint when the lift really moved
+      if (theme.rain > 0) {
+        for (let zi = 0; zi < ZONES.length; zi++) {
+          const p = studyPainted[zi];
+          if (p >= 0 && Math.abs(studyLift(zi) - p) > 0.002) paintStudyRoom(zi);
+        }
       }
       applyLampLevels(dtMs);
       if (rainLevel <= 0.01) return;

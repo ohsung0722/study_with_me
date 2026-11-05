@@ -34,10 +34,12 @@ export function lerpHex(a: number, b: number, k: number): number {
   return out;
 }
 
-/** Blend two themes; k is clamped to [0, 1]. Colours blend per 8-bit sRGB channel. */
-export function lerpTheme(a: Theme, b: Theme, k: number): Theme {
+/**
+ * Blend two themes; k is clamped to [0, 1]. Colours blend per 8-bit sRGB channel. Pass `out` (not a or b) to reuse a
+ * scratch theme instead of allocating one (every key is overwritten).
+ */
+export function lerpTheme(a: Theme, b: Theme, k: number, out: Theme = { ...a }): Theme {
   const t = Math.min(1, Math.max(0, k));
-  const out = { ...a };
   for (const key of COLOR_KEYS) out[key] = lerpHex(a[key], b[key], t);
   for (const key of NUM_KEYS) out[key] = a[key] * (1 - t) + b[key] * t; // exact at both ends
   return out;

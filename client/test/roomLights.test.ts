@@ -102,7 +102,7 @@ describe('RoomLights (players → per-room level)', () => {
     r.update(ROOM_LIGHT_OFF_DELAY_MS + ROOM_LIGHT_FADE_MS); // nobody marked since: off
     expect(r.level('studyA')).toBe(0);
   });
-  test('positions outside the building or on a wall line are ignored', () => {
+  test('positions outside the building (or not a number) are ignored', () => {
     const r = new RoomLights();
     run(r, [{ x: -3, z: 16 }, { x: 40, z: 21 }, { x: NaN, z: 16 }], 600);
     expect(r.level('studyA')).toBe(0);

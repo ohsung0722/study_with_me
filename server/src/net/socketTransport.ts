@@ -1,6 +1,6 @@
 import type { Server, Socket } from 'socket.io';
 import {
-  DRINKS, HAIR_STYLES, TICK_HZ,
+  BUILDING_ID, DRINKS, HAIR_STYLES, TICK_HZ,
   type ClientToServer, type DrinkId, type Profile, type ServerToClient,
 } from '@studyverse/shared';
 import type { Outbox } from '../game/outbox';
@@ -9,6 +9,7 @@ import type { World } from '../game/world';
 type IO = Server<ClientToServer, ServerToClient>;
 type Sock = Socket<ClientToServer, ServerToClient>;
 
+const BUILDING_ROOM = `building:${BUILDING_ID}`; // never collides with zone rooms `${BUILDING_ID}:${zone}`
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const DRINK_IDS: readonly string[] = Object.values(DRINKS).flat();
 
@@ -39,8 +40,8 @@ export function attachSocketTransport(
   const rooms = new Map<string, string>(); // socket id -> current room
 
   const out: Outbox = {
-    toAll: (ev, ...a) => { (io.emit as (e: string, ...x: unknown[]) => void)(ev, ...a); },
-    toAllExcept: (id, ev, ...a) => { (io.except(id).emit as (e: string, ...x: unknown[]) => void)(ev, ...a); },
+    toAll: (ev, ...a) => { (io.to(BUILDING_ROOM).emit as (e: string, ...x: unknown[]) => void)(ev, ...a); },
+    toAllExcept: (id, ev, ...a) => { (io.to(BUILDING_ROOM).except(id).emit as (e: string, ...x: unknown[]) => void)(ev, ...a); },
     toPlayer: (id, ev, ...a) => { (io.to(id).emit as (e: string, ...x: unknown[]) => void)(ev, ...a); },
     setRoom(id, room) {
       const s = io.sockets.sockets.get(id);
@@ -75,7 +76,7 @@ export function attachSocketTransport(
       const profile = parseProfile(p);
       if (!profile) return reply(cb, { ok: false, reason: 'nickname' });
       const r = world.join(id, profile);
-      if (r.ok) joined = true;
+      if (r.ok) { joined = true; socket.join(BUILDING_ROOM); }
       reply(cb, r);
     });
     on('move', (m) => {

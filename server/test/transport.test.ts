@@ -118,6 +118,21 @@ describe('socket transport', () => {
     expect((await join(a, prof('A', '가나다'))).ok).toBe(true);
   });
 
+  test('unjoined sockets receive no broadcasts', async () => {
+    const lurker = await client(); const a = await client(); const b = await client();
+    const seen: string[] = [];
+    for (const ev of ['snapshot', 'playerJoined', 'playerUpdated', 'wave', 'today', 'playerLeft']) (lurker as Socket).on(ev, () => seen.push(ev));
+    await join(b, prof('B', '라마바'));
+    await join(a, prof('A', '가나다'));
+    await sleep(100);
+    a.emit('move', { x: MAP.spawn.x + 0.5, z: MAP.spawn.z, ry: 1 });
+    await ack((cb) => a.emit('greet', cb as never));
+    await sleep(250);
+    a.disconnect();
+    await sleep(100);
+    expect(seen).toEqual([]);
+  });
+
   test('seatToday acks 0 for unknown seat', async () => {
     const a = await client();
     await join(a, prof('A', '가나다'));

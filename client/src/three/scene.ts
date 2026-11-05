@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { MAP } from '@studyverse/shared';
 import type { Theme } from './theme';
+import { StatsOverlay, statsEnabled } from '../ui/stats';
 
 export type FrameCallback = (dtMs: number, nowMs: number) => void;
 
@@ -58,12 +59,30 @@ export function createScene(container: HTMLElement): SceneCtx {
   const callbacks = new Set<FrameCallback>();
   let raf = 0;
   let last = 0;
+  const overlay = statsEnabled(location.search) ? new StatsOverlay(document.body) : null;
+  let statFrames = 0, statFrom = 0, statFrameSum = 0;
+  const showStats = (now: number, dt: number) => {
+    if (!overlay) return;
+    statFrames++;
+    statFrameSum += dt;
+    if (!statFrom) statFrom = now;
+    if (now - statFrom < 500) return;
+    let lights = 0;
+    scene.traverse((o) => { const l = o as THREE.PointLight; if (l.isPointLight && l.visible && l.intensity > 0.001) lights++; });
+    overlay.show({
+      fps: (statFrames * 1000) / (now - statFrom), frameMs: statFrameSum / statFrames,
+      calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
+      pixelRatio: renderer.getPixelRatio(), tier: 'n/a', lights,
+    });
+    statFrames = 0; statFrameSum = 0; statFrom = now;
+  };
   const loop = (now: number) => {
     raf = requestAnimationFrame(loop);
     const dt = last ? Math.min(MAX_DT_MS, now - last) : 0;
     last = now;
     for (const cb of callbacks) cb(dt, now);
     renderer.render(scene, camera);
+    showStats(now, dt);
   };
 
   return {
@@ -93,6 +112,7 @@ export function createScene(container: HTMLElement): SceneCtx {
       raf = 0;
       ro.disconnect();
       callbacks.clear();
+      overlay?.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     },

@@ -46,15 +46,18 @@ describe('npcExitPath / pointAlong', () => {
   });
   test('pointAlong interpolates along segments, faces the segment direction, clamps at the end', () => {
     const path = [{ x: 0, z: 0 }, { x: 0, z: 2 }, { x: -3, z: 2 }];
-    expect(pointAlong(path, 1)).toEqual({ x: 0, z: 1, ry: 0 });         // +z -> ry 0
+    expect(pointAlong(path, 1)).toEqual({ x: 0, z: 1, ry: 0, end: false }); // +z -> ry 0
     const p = pointAlong(path, 3);
     expect(p.x).toBeCloseTo(-1);
     expect(p.z).toBeCloseTo(2);
-    expect(p.ry).toBeCloseTo(-Math.PI / 2);                                // -x -> ry -PI/2
+    expect(p.ry).toBeCloseTo(-Math.PI / 2);                                  // -x -> ry -PI/2
+    expect(p.end).toBe(false);
     const end = pointAlong(path, 99);
     expect(end.x).toBeCloseTo(-3);
     expect(end.z).toBeCloseTo(2);
-    expect(pointAlong(path, -1)).toEqual({ x: 0, z: 0, ry: 0 });
+    expect(end.end).toBe(true);                                              // path complete: stop walking
+    expect(pointAlong(path, 5).end).toBe(true);                              // exactly the path length
+    expect(pointAlong(path, -1)).toEqual({ x: 0, z: 0, ry: 0, end: false });
   });
 });
 
@@ -72,7 +75,10 @@ describe('npcLeaveState', () => {
     expect(end.done).toBe(true);
     expect(end.opacity).toBe(0);
   });
-  test('walking lasts exactly 2 s', () => {
-    expect(NPC_WALK_MS).toBe(2000);
+  test('walks for 2 s: just before the end it has covered 2 s of WALK_SPEED', () => {
+    const last = npcLeaveState(NPC_STAND_MS + 2000 - 1);
+    expect(last.walking).toBe(true);
+    expect(last.distM).toBeCloseTo(WALK_SPEED * 2, 2);
+    expect(npcLeaveState(NPC_STAND_MS + 2000).done).toBe(true);
   });
 });

@@ -29,6 +29,7 @@ import { SeatTodayCache, seatTodayText } from './seatToday';
 import { Avatar, RemotePlayers } from './players';
 import { PendingGreet } from './social';
 import { devHourFromSearch, liveTodaySec } from './clock';
+import { maskBeforeStand, standLocally } from './selfState';
 
 const THEME_CHECK_MS = 60_000;
 const BREAK_CHECK_MS = 1000;   // the break-end alert must also fire while the tab is hidden (no frames then)
@@ -244,7 +245,7 @@ export class Game {
     const prevSeat = this.myView.seatId;
     if (this.standPending) {
       if (v.seatId === null) this.standPending = false;
-      else v = { ...v, seatId: null }; // sent before the server handled my stand
+      else v = maskBeforeStand(v); // sent before the server handled my stand
     }
     this.myView = { ...v };
     const seat = v.seatId && v.seatId !== prevSeat ? seatById(v.seatId) : undefined;
@@ -290,6 +291,7 @@ export class Game {
     const seat = this.myView.seatId ? seatById(this.myView.seatId) ?? null : null;
     this.myAvatar.place(this.me.x, this.me.z, this.me.ry, seat ? 'sit' : this.me.moving ? 'walk' : 'stand', dtMs);
     this.myAvatar.paint(this.myView, serverNow, true, dimAt(this.me.x, this.me.z));
+    this.myAvatar.setLabelVisible(!seat); // the seated camera sits right behind it; the HUD shows 🔒 and my time
 
     // camera + focus vignette centred on me
     this.cam.setSeatedView(seat);
@@ -366,7 +368,7 @@ export class Game {
     this.mover.flush(nowMs, this.me);
     this.conn.socket.emit('stand');
     this.standPending = true;
-    this.myView = { ...this.myView, seatId: null };
+    ({ view: this.myView, today: this.myToday } = standLocally(this.myView, this.myToday, this.serverNow()));
   }
 
   private acceptGreet(fromId: string): void {

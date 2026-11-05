@@ -30,9 +30,15 @@ export function npcExitPath(seat: Seat): Pt[] {
   return [{ x: seat.x, z: seat.z }, back, { x: AISLE_X, z: back.z }, { x: AISLE_X, z: DOOR.z }, { ...DOOR }];
 }
 
-/** Point `dist` metres along the polyline (clamped), facing the current segment (forward = (sin ry, cos ry)). */
-export function pointAlong(path: Pt[], dist: number): { x: number; z: number; ry: number } {
-  let left = Math.max(0, dist);
+/**
+ * Point `dist` metres along the polyline (clamped), facing the current segment (forward = (sin ry, cos ry)).
+ * `end` = the whole path is covered (stop walking there).
+ */
+export function pointAlong(path: Pt[], dist: number): { x: number; z: number; ry: number; end: boolean } {
+  let total = 0;
+  for (let i = 1; i < path.length; i++) total += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
+  const done = dist >= total - 1e-9;
+  let left = Math.min(Math.max(0, dist), total);
   let ry = 0;
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1], b = path[i];
@@ -41,12 +47,12 @@ export function pointAlong(path: Pt[], dist: number): { x: number; z: number; ry
     ry = Math.atan2(b.x - a.x, b.z - a.z);
     if (left <= len) {
       const k = left / len;
-      return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, ry };
+      return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, ry, end: done };
     }
     left -= len;
   }
-  const end = path[path.length - 1];
-  return { x: end.x, z: end.z, ry };
+  const last = path[path.length - 1];
+  return { x: last.x, z: last.z, ry, end: true };
 }
 
 /** NPC leaving timeline at `elapsedMs`: stand up, walk for NPC_WALK_MS (fading at the end), then done. */
@@ -88,6 +94,11 @@ export class Avatar {
     this.label.set(text, style);
     this.label.setOpacity((0.55 + 0.45 * dim) * this.fade);
     this.rig.setDim(dim);
+  }
+
+  /** My own label is hidden while I'm seated: the seated camera sits right behind it (the HUD shows 🔒/time). */
+  setLabelVisible(on: boolean): void {
+    this.label.object.visible = on;
   }
 
   /** Whole-avatar opacity (NPC exit). */
@@ -167,10 +178,6 @@ export class RemotePlayers {
     return out;
   }
 
-  has(id: string): boolean {
-    return this.map.has(id);
-  }
-
   update(dtMs: number, serverNow: number, dimAt: (x: number, z: number) => number): void {
     for (const [id, r] of this.map) {
       let x: number, z: number, ry: number, pose: Pose;
@@ -178,9 +185,14 @@ export class RemotePlayers {
         r.leaving.t += dtMs;
         const st = npcLeaveState(r.leaving.t);
         if (st.done) { this.drop(id); continue; }
-        if (st.walking) ({ x, z, ry } = pointAlong(r.leaving.path, st.distM));
-        else ({ x, z, facing: ry } = r.leaving.seat);
-        pose = st.walking ? 'walk' : 'stand';
+        pose = 'stand';
+        if (st.walking) {
+          const p = pointAlong(r.leaving.path, st.distM);
+          ({ x, z, ry } = p);
+          if (!p.end) pose = 'walk'; // at the door already: stand there and just fade
+        } else {
+          ({ x, z, facing: ry } = r.leaving.seat);
+        }
         r.avatar.setFade(st.opacity);
       } else {
         const seat = r.view.seatId ? seatById(r.view.seatId) : undefined;

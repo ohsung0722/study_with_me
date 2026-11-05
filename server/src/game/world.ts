@@ -6,10 +6,11 @@ import {
 } from '@studyverse/shared';
 import { computeToday } from './today';
 import { pickGreetTarget } from './greetings';
+import { NPC_SEATS, makeNpc, npcTarget } from './npc';
 import type { RecordStore } from '../store/store';
 import type { Outbox } from './outbox';
 
-export interface WorldDeps { now: () => number; store: RecordStore; out: Outbox }
+export interface WorldDeps { now: () => number; store: RecordStore; out: Outbox; rand?: () => number }
 
 export interface PlayerState extends PlayerView {
   anonId: string;
@@ -129,6 +130,7 @@ export class World {
   tick(): void {
     const { now, out } = this.deps;
     const t = now();
+    this.syncNpcs(t);
     for (const p of this.players.values()) {
       if (p.drink && t >= p.drink.until) {
         p.drink = null;
@@ -229,6 +231,36 @@ export class World {
 
   shutdown(): void {
     for (const p of this.players.values()) this.saveSession(p);
+  }
+
+  /** Bring the NPC count in line with npcTarget(realCount()); highest index leaves first. */
+  private syncNpcs(t: number): void {
+    const { out } = this.deps;
+    const rand = this.deps.rand ?? Math.random;
+    const target = npcTarget(this.realCount());
+    const npcs = [...this.players.values()].filter((p) => p.isNpc);
+    for (let i = npcs.length - 1; i >= target; i--) {
+      this.players.delete(npcs[i].id);
+      this.movedIds.delete(npcs[i].id);
+      out.toAll('playerLeft', { id: npcs[i].id, npc: true });
+    }
+    for (let i = npcs.length; i < target; i++) {
+      const seatId = this.npcSeat(i);
+      if (!seatId) continue;
+      const v = makeNpc(i, t, rand, seatId);
+      const p: PlayerState = { ...v, anonId: '', lastMoveAt: t, lastGreetAt: -Infinity, breakMinutes: 10, connected: true };
+      this.players.set(p.id, p);
+      out.toAll('playerJoined', toView(p));
+    }
+  }
+
+  /** NPC_SEATS[index] if free, else the free desk with the highest seat id. */
+  private npcSeat(index: number): string | null {
+    const taken = new Set<string>();
+    for (const p of this.players.values()) if (p.seatId) taken.add(p.seatId);
+    if (!taken.has(NPC_SEATS[index])) return NPC_SEATS[index];
+    const free = MAP.seats.filter((s) => s.kind === 'desk' && !taken.has(s.id)).map((s) => s.id).sort();
+    return free.length ? free[free.length - 1] : null;
   }
 
   private liveToday(): TodayStats {
